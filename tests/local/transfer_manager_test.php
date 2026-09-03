@@ -68,7 +68,11 @@ final class transfer_manager_test extends \advanced_testcase {
         $later = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/2'], $now + 1000);
         $asap = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/3'], 0);
 
-        $due = transfer_manager::get_due($now);
+        // The "asap" transfer is stamped with time() inside create(), which may be a
+        // second later than $now if the clock ticked; query at or after the creates
+        // so it counts as due regardless of that boundary (but well before $later).
+        $cutoff = time();
+        $due = transfer_manager::get_due($cutoff);
         $ids = array_keys($due);
         $this->assertContains($soon, $ids);
         $this->assertContains($asap, $ids);
@@ -76,7 +80,7 @@ final class transfer_manager_test extends \advanced_testcase {
 
         // A running transfer is not due even if its time passed.
         transfer_manager::claim($soon);
-        $due = transfer_manager::get_due($now);
+        $due = transfer_manager::get_due($cutoff);
         $this->assertArrayNotHasKey($soon, $due);
     }
 
