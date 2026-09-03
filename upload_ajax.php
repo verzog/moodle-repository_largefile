@@ -76,11 +76,13 @@ if ($action === 'newtoken') {
         $senderror('Context not found.');
     }
     $requirerepoaccess($context);
-    // The server-side ceiling for a staged file: the site upload limit, or
-    // unlimited when the site imposes none. The destination form re-checks its
-    // own (possibly smaller) limit when the file is selected.
-    $sitemax = (int) ($CFG->maxbytes ?? 0);
-    $maxbytes = $sitemax > 0 ? $sitemax : -1;
+    // Cap a staged file at the user's real upload limit in this context. For a
+    // user allowed to ignore file-size limits this is USER_CAN_IGNORE_FILE_SIZE_LIMITS
+    // (-1, i.e. unlimited) — exactly the set of users the destination picker will
+    // accept an over-limit file from — while every other logged-in user is bounded
+    // to what the destination would actually accept. That stops a permitted but
+    // unprivileged user streaming arbitrarily large files into dataroot.
+    $maxbytes = get_user_max_upload_file_size($context, (int) ($CFG->maxbytes ?? 0));
     $id = chunk_store::create_token($contextid, $maxbytes);
     if ($id === null) {
         $senderror(get_string('erroruploadfailed', 'repository_largefile'));

@@ -143,6 +143,17 @@ class chunk_store {
         $record->state = self::STATE_COMPLETED;
         $record->lastmodified = time();
         $DB->update_record(self::TABLE, $record);
+
+        // The fetchurl endpoint runs without the session lock, so a concurrent
+        // cancel may have deleted this token between the lookup above and now — in
+        // which case the update wrote nothing and the moved payload would sit under
+        // dataroot with no row for the cleanup task to find. Re-check and remove it.
+        if (!self::get_record($id)) {
+            if (file_exists($target)) {
+                @unlink($target);
+            }
+            return false;
+        }
         return true;
     }
 

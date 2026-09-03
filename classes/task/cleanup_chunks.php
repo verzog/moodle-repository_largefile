@@ -60,6 +60,33 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge(chunk_store::STATE_UNUSED, (int) $state0duration);
         $this->purge(chunk_store::STATE_STARTED, (int) $state1duration);
         $this->purge(chunk_store::STATE_COMPLETED, (int) $state2duration);
+        $this->purge_export_files();
+    }
+
+    /**
+     * Remove the short-lived stored_file copies made for privacy exports. They
+     * only need to survive the export request that created them, so anything more
+     * than an hour old is stale and is deleted to reclaim the space.
+     *
+     * @return void
+     */
+    private function purge_export_files(): void {
+        global $DB;
+        $fs = get_file_storage();
+        $rs = $DB->get_recordset_select(
+            'files',
+            "component = :component AND filearea = :filearea AND filename <> '.' AND timecreated < :cutoff",
+            ['component' => 'repository_largefile', 'filearea' => 'privacyexport', 'cutoff' => time() - HOURSECS],
+            '',
+            'id'
+        );
+        foreach ($rs as $filerec) {
+            $file = $fs->get_file_by_id($filerec->id);
+            if ($file) {
+                $file->delete();
+            }
+        }
+        $rs->close();
     }
 
     /**

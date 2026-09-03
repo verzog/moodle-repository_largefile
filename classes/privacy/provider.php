@@ -46,9 +46,6 @@ class provider implements
     \core_privacy\local\metadata\provider,
     \core_privacy\local\request\core_userlist_provider,
     \core_privacy\local\request\plugin\provider {
-    /** @var int Largest staged payload whose bytes are inlined into a privacy export (10 MB). */
-    private const EXPORT_INLINE_MAXBYTES = 10485760;
-
     /**
      * Describe the personal data stored by this plugin.
      *
@@ -62,6 +59,9 @@ class provider implements
             'filename' => 'privacy:metadata:repository_largefile_chunks:filename',
             'lastmodified' => 'privacy:metadata:repository_largefile_chunks:lastmodified',
         ], 'privacy:metadata:repository_largefile_chunks');
+        // A staged payload's bytes are streamed into an export through the file
+        // API (a short-lived copy the cleanup task removes).
+        $collection->add_subsystem_link('core_files', [], 'privacy:metadata:core_files');
         return $collection;
     }
 
@@ -114,14 +114,9 @@ class provider implements
             }
             $subcontext = [get_string('privacy:chunkspath', 'repository_largefile')];
             $writer = \core_privacy\local\request\writer::with_context($context);
+            $fs = get_file_storage();
             $data = [];
             foreach ($records as $record) {
-                // The staged upload lives under dataroot (outside the file API).
-                // Include its actual bytes when it is small enough to hold in
-                // memory safely; a larger transient payload (this plugin can stage
-                // multi-gigabyte files) is documented by its size in the metadata
-                // rather than loaded whole, which would risk an out-of-memory
-                // failure and drop the whole export.
                 $path = \repository_largefile\chunk_store::get_path_for_id((string) $record->id);
                 $size = ($path !== null && is_readable($path)) ? (int) filesize($path) : 0;
                 $data[] = (object) [
@@ -129,9 +124,33 @@ class provider implements
                     'filesize' => $size,
                     'lastmodified' => $record->lastmodified ? userdate($record->lastmodified) : '',
                 ];
-                if ($size > 0 && $size <= self::EXPORT_INLINE_MAXBYTES) {
+                if ($size > 0) {
+                    // Include the actual bytes without loading the (possibly
+                    // multi-gigabyte) file into memory: stage it as a stored_file so
+                    // the writer streams it into the export. The temporary
+                    // stored_file is removed by the cleanup task (see
+                    // task\cleanup_chunks::purge_export_files()).
                     $filename = (string) $record->filename !== '' ? (string) $record->filename : ('upload_' . $record->id);
-                    $writer->export_custom_file($subcontext, $filename, (string) file_get_contents($path));
+                    $filerecord = [
+                        'contextid' => $context->id,
+                        'component' => 'repository_largefile',
+                        'filearea' => 'privacyexport',
+                        'itemid' => (int) $record->id,
+                        'filepath' => '/',
+                        'filename' => clean_param($filename, PARAM_FILE),
+                    ];
+                    $existing = $fs->get_file(
+                        $context->id,
+                        'repository_largefile',
+                        'privacyexport',
+                        (int) $record->id,
+                        '/',
+                        $filerecord['filename']
+                    );
+                    if ($existing) {
+                        $existing->delete();
+                    }
+                    $writer->export_file($subcontext, $fs->create_file_from_pathname($filerecord, $path));
                 }
             }
             $writer->export_data($subcontext, (object) ['uploads' => $data]);

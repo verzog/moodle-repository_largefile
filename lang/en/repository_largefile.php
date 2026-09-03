@@ -43,6 +43,7 @@ $string['pluginname'] = 'Large file (URL or chunked upload)';
 $string['pluginname_help'] = 'Bring in a file that is too big for a normal upload: fetch it from a URL server-side, '
     . 'or upload it from your computer in small chunks that are not limited by this server\'s PHP upload size.';
 $string['privacy:chunkspath'] = 'Chunked uploads';
+$string['privacy:metadata:core_files'] = 'A staged upload\'s bytes are streamed through the file API into a data export.';
 $string['privacy:metadata:repository_largefile_chunks'] = 'Temporary records of large files uploaded in chunks before '
     . 'they are handed to the file picker.';
 $string['privacy:metadata:repository_largefile_chunks:contextid'] = 'The context in which the file was uploaded.';
