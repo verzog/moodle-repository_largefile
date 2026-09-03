@@ -68,4 +68,75 @@ final class transfer_runner_test extends \advanced_testcase {
         $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
         $this->assertSame(0, $DB->count_records('repository_largefile_chunks'));
     }
+
+    /**
+     * A background publish encrypts the staged draft, records a share with a link,
+     * and removes the plaintext source once it is done.
+     *
+     * @return void
+     */
+    public function test_share_publish_encrypts_and_links(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+        $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
+
+        // Stage a backup in the user's draft area, as the create-share form would.
+        $usercontext = \context_user::instance($user->id);
+        $draftid = file_get_unused_draft_itemid();
+        $fs = get_file_storage();
+        $fs->create_file_from_string([
+            'contextid' => $usercontext->id,
+            'component' => 'user',
+            'filearea' => 'draft',
+            'itemid' => $draftid,
+            'filepath' => '/',
+            'filename' => 'backup.mbz',
+            'userid' => $user->id,
+        ], 'PLAINTEXT-BACKUP-CONTENTS');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $user->id,
+            ['peerid' => $peerid, 'draftid' => $draftid, 'expires' => 0, 'maxdownloads' => 1],
+            0,
+            \context_system::instance()->id,
+            'backup.mbz'
+        );
+        transfer_runner::run(transfer_manager::get($id));
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status);
+        $this->assertStringContainsString('/repository/largefile/share.php', (string) $transfer->result);
+        $this->assertStringContainsString('token=', (string) $transfer->result);
+        // A share row was created, and the plaintext draft source was removed.
+        $this->assertEquals(1, $DB->count_records('repository_largefile_shares'));
+        $this->assertFalse($fs->file_exists($usercontext->id, 'user', 'draft', $draftid, '/', 'backup.mbz'));
+    }
+
+    /**
+     * A publish whose staged draft is missing fails cleanly and creates no share.
+     *
+     * @return void
+     */
+    public function test_share_publish_missing_source_fails(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $user = $this->getDataGenerator()->create_user();
+        $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $user->id,
+            ['peerid' => $peerid, 'draftid' => 999999, 'expires' => 0, 'maxdownloads' => 1],
+            0,
+            \context_system::instance()->id,
+            'gone.mbz'
+        );
+        transfer_runner::run(transfer_manager::get($id));
+
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+        $this->assertSame(0, $DB->count_records('repository_largefile_shares'));
+    }
 }

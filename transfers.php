@@ -119,6 +119,7 @@ if ($transfers) {
     $typenames = [
         transfer_manager::TYPE_URL => get_string('transfertypeurl', 'repository_largefile'),
         transfer_manager::TYPE_SHARE => get_string('transfertypeshare', 'repository_largefile'),
+        transfer_manager::TYPE_PUBLISH => get_string('transfertypepublish', 'repository_largefile'),
     ];
     $table = new html_table();
     $table->head = [

@@ -27,6 +27,7 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_manager;
+use repository_largefile\local\transfer_manager;
 use repository_largefile\local\manage_page;
 use repository_largefile\form\share_form;
 use repository_largefile\event\share_created;
@@ -60,6 +61,29 @@ if ($peers) {
         $usercontext = context_user::instance($USER->id);
         $files = $fs->get_area_files($usercontext->id, 'user', 'draft', $data->sharefile, 'id DESC', false);
         $file = reset($files);
+        if ($file && !empty($data->background)) {
+            // Encrypt and publish on the server, immune to the web request timeout
+            // that a large backup would otherwise hit. The file stays in the draft
+            // area (no copy of a large backup here) and is referenced by its draft
+            // id; the scheduled task encrypts it and the link lands on Transfers.
+            transfer_manager::create(
+                transfer_manager::TYPE_PUBLISH,
+                (int) $USER->id,
+                [
+                    'peerid' => (int) $data->peerid,
+                    'draftid' => (int) $data->sharefile,
+                    'expires' => empty($data->expiry) ? 0 : time() + (int) $data->expiry,
+                    'maxdownloads' => max(0, (int) $data->maxdownloads),
+                ],
+                0,
+                $context->id,
+                $file->get_filename()
+            );
+            redirect(
+                new moodle_url('/repository/largefile/transfers.php'),
+                get_string('sharequeued', 'repository_largefile')
+            );
+        }
         if ($file) {
             $temp = make_request_directory() . '/' . $file->get_filename();
             $file->copy_content_to($temp);

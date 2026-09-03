@@ -48,6 +48,9 @@ class transfer_manager {
     /** @var string A fetch-and-decrypt of a backup shared by a peer. */
     public const TYPE_SHARE = 'shareimport';
 
+    /** @var string A server-side encrypt-and-publish of a backup to a peer. */
+    public const TYPE_PUBLISH = 'sharepublish';
+
     /** @var string Queued, waiting for its scheduled time (or the next run). */
     public const STATUS_SCHEDULED = 'scheduled';
 

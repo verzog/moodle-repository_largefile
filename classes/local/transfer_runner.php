@@ -58,6 +58,8 @@ class transfer_runner {
                 $result = self::run_url_import($transfer, $payload);
             } else if ($transfer->type === transfer_manager::TYPE_SHARE) {
                 $result = self::run_share_import($transfer, $payload);
+            } else if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
+                $result = self::run_share_publish($transfer, $payload);
             } else {
                 throw new \moodle_exception('errortransferunknown', 'repository_largefile');
             }
@@ -134,5 +136,55 @@ class transfer_runner {
             $filename
         )->trigger();
         return $filename;
+    }
+
+    /**
+     * Encrypt a staged backup for a peer and publish it, server-side.
+     *
+     * The file was left in the owner's draft area by the create-share form and is
+     * referenced by its draft item id, so no copy of a large backup is made in the
+     * web request. Here it is encrypted and stored ({@see share_manager}); the
+     * draft source is removed on success (and otherwise reclaimed by Moodle's own
+     * draft cleanup, so a failure leaves no orphaned copy behind).
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param array $payload Decoded payload; expects 'peerid', 'draftid', 'expires' and 'maxdownloads'.
+     * @return string The share link to hand to the peer.
+     * @throws \moodle_exception If the staged file is gone or encryption fails.
+     */
+    private static function run_share_publish(\stdClass $transfer, array $payload): string {
+        $peerid = (int) ($payload['peerid'] ?? 0);
+        $draftid = (int) ($payload['draftid'] ?? 0);
+        $expires = (int) ($payload['expires'] ?? 0);
+        $maxdownloads = (int) ($payload['maxdownloads'] ?? 0);
+
+        $fs = get_file_storage();
+        $usercontext = \context_user::instance((int) $transfer->userid);
+        $files = $fs->get_area_files($usercontext->id, 'user', 'draft', $draftid, 'id DESC', false);
+        $file = reset($files);
+        if (!$file) {
+            throw new \moodle_exception('errorsharenofile', 'repository_largefile');
+        }
+
+        $temp = make_request_directory() . '/' . $file->get_filename();
+        $file->copy_content_to($temp);
+        try {
+            $share = share_manager::create(
+                $peerid,
+                $temp,
+                $file->get_filename(),
+                $expires,
+                $maxdownloads,
+                (int) $transfer->userid
+            );
+        } finally {
+            @unlink($temp);
+        }
+        \repository_largefile\event\share_created::for_share($share)->trigger();
+
+        // The plaintext source is no longer needed once it is encrypted and stored.
+        $file->delete();
+
+        return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
     }
 }
