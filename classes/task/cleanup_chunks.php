@@ -61,6 +61,36 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge(chunk_store::STATE_STARTED, (int) $state1duration);
         $this->purge(chunk_store::STATE_COMPLETED, (int) $state2duration);
         $this->purge_export_files();
+        $this->purge_expired_shares();
+        $this->purge_old_nonces();
+    }
+
+    /**
+     * Delete shares that have expired or reached their download limit, along with
+     * their encrypted files.
+     *
+     * @return void
+     */
+    private function purge_expired_shares(): void {
+        global $DB;
+        $now = time();
+        $sql = '(expires <> 0 AND expires < :now) OR (maxdownloads <> 0 AND downloadcount >= maxdownloads)';
+        $ids = $DB->get_fieldset_select('repository_largefile_shares', 'id', $sql, ['now' => $now]);
+        foreach ($ids as $id) {
+            \repository_largefile\local\share_manager::delete((int) $id);
+        }
+    }
+
+    /**
+     * Drop spent request nonces older than the signing window; past it, a nonce
+     * can never pass the timestamp check anyway, so re-use is already impossible.
+     *
+     * @return void
+     */
+    private function purge_old_nonces(): void {
+        global $DB;
+        $cutoff = time() - \repository_largefile\local\signer::nonce_retention();
+        $DB->delete_records_select('repository_largefile_nonces', 'timecreated < :cutoff', ['cutoff' => $cutoff]);
     }
 
     /**

@@ -59,3 +59,24 @@ if ($ADMIN->fulltree) {
         86400
     ));
 }
+
+// External backup sharing management pages (gated by the sharing capability, so
+// a manager can be granted access without full site config).
+$ADMIN->add('repositorysettings', new admin_externalpage(
+    'repository_largefile_peers',
+    get_string('managepeers', 'repository_largefile'),
+    new moodle_url('/repository/largefile/manage_peers.php'),
+    'repository/largefile:share'
+));
+$ADMIN->add('repositorysettings', new admin_externalpage(
+    'repository_largefile_shares',
+    get_string('manageshares', 'repository_largefile'),
+    new moodle_url('/repository/largefile/manage_shares.php'),
+    'repository/largefile:share'
+));
+$ADMIN->add('repositorysettings', new admin_externalpage(
+    'repository_largefile_import',
+    get_string('importshared', 'repository_largefile'),
+    new moodle_url('/repository/largefile/import.php'),
+    'repository/largefile:import'
+));
