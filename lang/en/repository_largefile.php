@@ -107,15 +107,15 @@ $string['revokeshare'] = 'Revoke';
 $string['revokeshareconfirm'] = 'Revoke this share? The peer will no longer be able to download it.';
 $string['selectuploaded'] = 'Select uploaded file';
 $string['setting:chunksize'] = 'Chunk size (MB)';
-$string['setting:chunksize_desc'] = 'Size of each chunk sent to the server when uploading a large file, in megabytes. '
+$string['setting:chunksize_help'] = 'Size of each chunk sent to the server when uploading a large file, in megabytes. '
     . 'Lower this if large uploads fail — some web servers, reverse proxies and firewalls reject large request bodies.';
 $string['setting:state0duration'] = 'Keep unused upload tokens for';
-$string['setting:state0duration_desc'] = 'How long an upload token that was generated but never used is kept before the '
+$string['setting:state0duration_help'] = 'How long an upload token that was generated but never used is kept before the '
     . 'cleanup task removes it.';
 $string['setting:state1duration'] = 'Keep unfinished uploads for';
-$string['setting:state1duration_desc'] = 'How long a partially uploaded file is kept before the cleanup task removes it.';
+$string['setting:state1duration_help'] = 'How long a partially uploaded file is kept before the cleanup task removes it.';
 $string['setting:state2duration'] = 'Keep completed uploads for';
-$string['setting:state2duration_desc'] = 'How long a completed upload that was never selected is kept before the cleanup '
+$string['setting:state2duration_help'] = 'How long a completed upload that was never selected is kept before the cleanup '
     . 'task removes it.';
 $string['settings'] = 'Chunked upload settings';
 $string['sharecreated'] = 'Share created.';
@@ -133,6 +133,7 @@ $string['sharemaxdownloads'] = 'Maximum downloads';
 $string['sharemaxdownloads_help'] = 'How many times the share may be downloaded before it stops working. Use 0 for no '
     . 'limit. A one-time share (1) is the safest default.';
 $string['sharepeer'] = 'Share with peer';
+$string['sharingmanagement'] = 'Backup sharing';
 $string['tabupload'] = 'Upload a large file';
 $string['taburl'] = 'From a URL';
 $string['tokenexpired'] = 'The upload session has expired. Close and reopen the file picker to start again.';

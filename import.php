@@ -29,12 +29,19 @@ use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_client;
 use repository_largefile\event\backup_imported;
 
-admin_externalpage_setup('repository_largefile_import');
+// Repository plugins are not part of the admin settings tree, so this page stands
+// alone: it is reached from the plugin's configuration page and gated by the
+// import capability (which a manager can hold without full site config).
+require_login();
 $context = context_system::instance();
 require_capability('repository/largefile:import', $context);
 
 $baseurl = new moodle_url('/repository/largefile/import.php');
+$PAGE->set_context($context);
 $PAGE->set_url($baseurl);
+$PAGE->set_pagelayout('admin');
+$PAGE->set_title(get_string('importshared', 'repository_largefile'));
+$PAGE->set_heading(get_string('importshared', 'repository_largefile'));
 
 $peers = peer_manager::menu();
 $error = null;

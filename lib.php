@@ -192,4 +192,72 @@ class repository_largefile extends repository {
     public function contains_private_data() {
         return true;
     }
+
+    /**
+     * Names of the global (type) options this repository stores.
+     *
+     * Repository plugins do not load settings.php the way most plugins do, so the
+     * tunables live on the repository's own configuration page (reached from Site
+     * administration > Plugins > Repositories > Large file) via
+     * {@see self::type_config_form()}. They are persisted under the bare type name,
+     * so they are read back with get_config('largefile', ...).
+     *
+     * @return array The option names to persist.
+     */
+    public static function get_type_option_names() {
+        return array_merge(
+            parent::get_type_option_names(),
+            ['chunksize', 'state0duration', 'state1duration', 'state2duration']
+        );
+    }
+
+    /**
+     * Add the plugin's global settings (and links to its management pages) to the
+     * repository type configuration form.
+     *
+     * @param object $mform The type configuration form.
+     * @param string $classname The repository class name.
+     * @return void
+     */
+    public static function type_config_form($mform, $classname = 'repository') {
+        parent::type_config_form($mform, $classname);
+
+        $mform->addElement('header', 'largefilechunkheader', get_string('settings', 'repository_largefile'));
+
+        $mform->addElement('text', 'chunksize', get_string('setting:chunksize', 'repository_largefile'), ['size' => 6]);
+        $mform->setType('chunksize', PARAM_INT);
+        $mform->setDefault('chunksize', 20);
+        $mform->addHelpButton('chunksize', 'setting:chunksize', 'repository_largefile');
+
+        $mform->addElement('duration', 'state0duration', get_string('setting:state0duration', 'repository_largefile'));
+        $mform->setDefault('state0duration', 3600);
+        $mform->addHelpButton('state0duration', 'setting:state0duration', 'repository_largefile');
+
+        $mform->addElement('duration', 'state1duration', get_string('setting:state1duration', 'repository_largefile'));
+        $mform->setDefault('state1duration', 3600);
+        $mform->addHelpButton('state1duration', 'setting:state1duration', 'repository_largefile');
+
+        $mform->addElement('duration', 'state2duration', get_string('setting:state2duration', 'repository_largefile'));
+        $mform->setDefault('state2duration', 86400);
+        $mform->addHelpButton('state2duration', 'setting:state2duration', 'repository_largefile');
+
+        // Links to the plugin's management pages, so everything for this plugin is
+        // reached one level under its own configuration page.
+        $links = [
+            \html_writer::link(
+                new \moodle_url('/repository/largefile/manage_peers.php'),
+                get_string('managepeers', 'repository_largefile')
+            ),
+            \html_writer::link(
+                new \moodle_url('/repository/largefile/manage_shares.php'),
+                get_string('manageshares', 'repository_largefile')
+            ),
+            \html_writer::link(
+                new \moodle_url('/repository/largefile/import.php'),
+                get_string('importshared', 'repository_largefile')
+            ),
+        ];
+        $mform->addElement('header', 'largefilesharingheader', get_string('sharingmanagement', 'repository_largefile'));
+        $mform->addElement('static', 'largefilelinks', '', \html_writer::alist($links));
+    }
 }

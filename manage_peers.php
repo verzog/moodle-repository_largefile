@@ -28,14 +28,21 @@ require_once($CFG->libdir . '/adminlib.php');
 use repository_largefile\local\peer_manager;
 use repository_largefile\form\peer_form;
 
-admin_externalpage_setup('repository_largefile_peers');
+// Repository plugins are not part of the admin settings tree, so this management
+// page stands alone: it is reached from the plugin's configuration page and gated
+// by the sharing capability (which a manager can hold without full site config).
+require_login();
 $context = context_system::instance();
 require_capability('repository/largefile:share', $context);
 
 $action = optional_param('action', '', PARAM_ALPHA);
 $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/manage_peers.php');
+$PAGE->set_context($context);
 $PAGE->set_url($baseurl);
+$PAGE->set_pagelayout('admin');
+$PAGE->set_title(get_string('managepeers', 'repository_largefile'));
+$PAGE->set_heading(get_string('managepeers', 'repository_largefile'));
 
 if ($action === 'delete' && $id) {
     require_sesskey();

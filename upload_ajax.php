@@ -89,7 +89,7 @@ if ($action === 'newtoken') {
     }
     // Chunk size in bytes, from the admin setting, with a 20 MB fallback so a
     // missing or zero setting can never stall the uploader.
-    $chunkmb = (int) get_config('repository_largefile', 'chunksize');
+    $chunkmb = (int) get_config('largefile', 'chunksize');
     if ($chunkmb <= 0) {
         $chunkmb = 20;
     }

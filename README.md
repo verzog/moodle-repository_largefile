@@ -79,8 +79,12 @@ adds.
 2. Visit *Site administration > Notifications* to complete installation.
 3. Enable it at *Site administration > Plugins > Repositories > Manage
    repositories* — set **Large file** to "Enabled and visible".
-4. (Optional) Tune the chunk size and retention at *Site administration >
-   Plugins > Repositories > Large file*.
+4. (Optional) Tune the chunk size and retention on the plugin's own
+   configuration page at *Site administration > Plugins > Repositories > Large
+   file*. That page is also where the backup-sharing management links live
+   (trusted peers, backup shares, import) — repository plugins are not part of the
+   admin settings tree, so everything for this plugin hangs off its configuration
+   page rather than sitting as separate nodes.
 
 Requires Moodle 5.0+ and PHP 8.2–8.4.
 
@@ -100,12 +104,15 @@ Two sites that both run this plugin can share a course backup securely, without 
 shared filesystem or a third-party service. The transfer is authenticated and the
 payload is encrypted end to end and at rest.
 
-**Pairing.** On each site, add the other as a *trusted peer* at *Site
-administration > Plugins > Repositories > Large file: trusted peers* and paste the
-same shared secret (≥24 characters) on both. The secret is stored encrypted with
-the site key (`\core\encryption`), never in the clear.
+All three management pages are reached from the plugin's configuration page
+(*Site administration > Plugins > Repositories > Large file*).
 
-**Publishing (sender).** At *Large file: publish a share*, upload a backup (the
+**Pairing.** On each site, open **Trusted peers** from that configuration page,
+add the other site, and paste the same shared secret (≥24 characters) on both. The
+secret is stored encrypted with the site key (`\core\encryption`), never in the
+clear.
+
+**Publishing (sender).** On the **Backup shares** page, upload a backup (the
 chunked uploader in the picker handles files above the PHP limit), pick a peer,
 and set an optional expiry and download cap. The plugin derives a per-share key
 (HKDF-SHA256 over the pairing secret and a fresh random salt), encrypts the file
@@ -113,7 +120,7 @@ with libsodium's XChaCha20-Poly1305 *secretstream* (authenticated and
 truncation-detecting), stores only the ciphertext, and gives you a share link to
 hand to the peer.
 
-**Importing (receiver).** At *Large file: import a share*, choose the peer and
+**Importing (receiver).** On the **Import a shared backup** page, choose the peer and
 paste the link. The plugin fetches the metadata and ciphertext through Moodle's
 SSRF-aware `\curl` wrapper, decrypts with the key re-derived from the pairing
 secret and the share's salt, and verifies the recovered plaintext against the
