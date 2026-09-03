@@ -53,12 +53,14 @@ if ($action === 'cancel' && $id) {
     require_sesskey();
     if ($mayacton($id)) {
         transfer_manager::cancel($id);
+        transfer_manager::delete_publish_source($id);
     }
     redirect($baseurl, get_string('transfercancelled', 'repository_largefile'));
 }
 if ($action === 'remove' && $id) {
     require_sesskey();
     if ($mayacton($id)) {
+        transfer_manager::delete_publish_source($id);
         transfer_manager::delete($id);
     }
     redirect($baseurl, get_string('transferremoved', 'repository_largefile'));

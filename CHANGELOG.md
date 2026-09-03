@@ -10,9 +10,12 @@ All notable changes to `repository_largefile` are documented here.
   Backup shares form now offers **Create in the background** (on by default): the
   uploaded backup is encrypted on the server as a queued transfer, immune to the
   request timeout, and its share link appears on the **Transfers** page when ready.
-  The upload is referenced in place (no second copy of a large backup is made) and
-  is removed once it has been encrypted. A new *Backup share (publish)* transfer
-  type; runs under the same `process_transfers` scheduled task, so it needs cron.
+  The upload is referenced into a plugin-owned staging area (no second copy of a
+  large backup is made, and it survives Moodle's draft cleanup while it waits) and
+  removed once it has been encrypted — or on cancellation, with the cleanup task
+  sweeping any source left by a failed publish. A new *Backup share (publish)*
+  transfer type; runs under the same `process_transfers` scheduled task, so it needs
+  cron.
   A **Backups being published** section on the page tracks each queued job (and
   lets you cancel one), the shares list now shows each share's **link** so it can
   be retrieved at any time, and the expiry is measured from when the share is

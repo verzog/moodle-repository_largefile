@@ -55,6 +55,7 @@ if ($action === 'cancelpublish' && $id) {
     $pending = transfer_manager::get($id);
     if ($pending && $pending->type === transfer_manager::TYPE_PUBLISH && (int) $pending->userid === (int) $USER->id) {
         transfer_manager::cancel($id);
+        transfer_manager::delete_publish_source($id);
     }
     redirect($baseurl, get_string('transfercancelled', 'repository_largefile'));
 }
@@ -72,15 +73,13 @@ if ($peers) {
         $file = reset($files);
         if ($file && !empty($data->background)) {
             // Encrypt and publish on the server, immune to the web request timeout
-            // that a large backup would otherwise hit. The file stays in the draft
-            // area (no copy of a large backup here) and is referenced by its draft
-            // id; the scheduled task encrypts it and the link appears on this page.
-            transfer_manager::create(
+            // that a large backup would otherwise hit. The scheduled task encrypts
+            // it and the link appears on this page.
+            $transferid = transfer_manager::create(
                 transfer_manager::TYPE_PUBLISH,
                 (int) $USER->id,
                 [
                     'peerid' => (int) $data->peerid,
-                    'draftid' => (int) $data->sharefile,
                     // Store the requested duration, not an absolute time: the runner
                     // starts the expiry when the share is actually created.
                     'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
@@ -90,6 +89,18 @@ if ($peers) {
                 $context->id,
                 $file->get_filename()
             );
+            // Stage the upload into a plugin-owned area keyed by the transfer id, so
+            // it survives Moodle's draft-area cleanup until the job runs. Referencing
+            // the stored file copies only a file record — the (multi-gigabyte) bytes
+            // are shared, not duplicated.
+            $fs->create_file_from_storedfile([
+                'contextid' => $context->id,
+                'component' => 'repository_largefile',
+                'filearea' => transfer_manager::PENDING_FILEAREA,
+                'itemid' => $transferid,
+                'filepath' => '/',
+                'filename' => $file->get_filename(),
+            ], $file);
             // Return to this page (the publisher holds the sharing capability, which
             // the site-wide Transfers monitor does not require); the pending job and
             // then its link appear below.

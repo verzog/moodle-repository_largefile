@@ -211,6 +211,7 @@ class provider implements
             }
             $transfers = $DB->get_records('repository_largefile_transfers', ['userid' => $user->id]);
             if ($transfers) {
+                $fs = get_file_storage();
                 $transferdata = [];
                 foreach ($transfers as $transfer) {
                     $transferdata[] = (object) [
@@ -222,6 +223,23 @@ class provider implements
                         'error' => $transfer->error,
                         'timecreated' => userdate((int) $transfer->timecreated),
                     ];
+                    // A queued publication still holds its staged plaintext source;
+                    // stream it into the export without loading it into memory.
+                    $staged = $fs->get_area_files(
+                        $system->id,
+                        'repository_largefile',
+                        \repository_largefile\local\transfer_manager::PENDING_FILEAREA,
+                        (int) $transfer->id,
+                        'id DESC',
+                        false
+                    );
+                    $stagedfile = reset($staged);
+                    if ($stagedfile) {
+                        \core_privacy\local\request\writer::with_context($system)->export_file(
+                            [get_string('transfers', 'repository_largefile')],
+                            $stagedfile
+                        );
+                    }
                 }
                 \core_privacy\local\request\writer::with_context($system)->export_data(
                     [get_string('transfers', 'repository_largefile')],
@@ -329,6 +347,12 @@ class provider implements
      */
     private static function delete_transfers(string $select, array $params): void {
         global $DB;
+        // Remove any staged publication source before dropping its transfer row, so
+        // erasing a user does not leave their plaintext backup behind.
+        $ids = $DB->get_fieldset_select('repository_largefile_transfers', 'id', $select, $params);
+        foreach ($ids as $id) {
+            \repository_largefile\local\transfer_manager::delete_publish_source((int) $id);
+        }
         $DB->delete_records_select('repository_largefile_transfers', $select, $params);
     }
 }

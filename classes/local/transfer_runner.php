@@ -141,20 +141,19 @@ class transfer_runner {
     /**
      * Encrypt a staged backup for a peer and publish it, server-side.
      *
-     * The file was left in the owner's draft area by the create-share form and is
-     * referenced by its draft item id, so no copy of a large backup is made in the
-     * web request. Here it is encrypted and stored ({@see share_manager}); the
-     * draft source is removed on success (and otherwise reclaimed by Moodle's own
-     * draft cleanup, so a failure leaves no orphaned copy behind).
+     * The uploaded backup was staged by the create-share form into a plugin-owned
+     * area keyed by this transfer's id, so no copy of a large backup is made in the
+     * web request and Moodle's draft cleanup cannot remove it before the job runs.
+     * Here it is encrypted and stored ({@see share_manager}); the staged source is
+     * removed on success (and, on failure, swept by the cleanup task).
      *
      * @param \stdClass $transfer The transfer row.
-     * @param array $payload Decoded payload; expects 'peerid', 'draftid', 'expiryduration' and 'maxdownloads'.
+     * @param array $payload Decoded payload; expects 'peerid', 'expiryduration' and 'maxdownloads'.
      * @return string The share link to hand to the peer.
      * @throws \moodle_exception If the staged file is gone or encryption fails.
      */
     private static function run_share_publish(\stdClass $transfer, array $payload): string {
         $peerid = (int) ($payload['peerid'] ?? 0);
-        $draftid = (int) ($payload['draftid'] ?? 0);
         // The expiry is measured from when the share actually exists, not from when
         // it was queued, so a cron delay does not eat into the share's lifetime.
         $duration = (int) ($payload['expiryduration'] ?? 0);
@@ -162,8 +161,14 @@ class transfer_runner {
         $maxdownloads = (int) ($payload['maxdownloads'] ?? 0);
 
         $fs = get_file_storage();
-        $usercontext = \context_user::instance((int) $transfer->userid);
-        $files = $fs->get_area_files($usercontext->id, 'user', 'draft', $draftid, 'id DESC', false);
+        $files = $fs->get_area_files(
+            \context_system::instance()->id,
+            'repository_largefile',
+            transfer_manager::PENDING_FILEAREA,
+            (int) $transfer->id,
+            'id DESC',
+            false
+        );
         $file = reset($files);
         if (!$file) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
@@ -186,7 +191,7 @@ class transfer_runner {
         \repository_largefile\event\share_created::for_share($share)->trigger();
 
         // The plaintext source is no longer needed once it is encrypted and stored.
-        $file->delete();
+        transfer_manager::delete_publish_source((int) $transfer->id);
 
         return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
     }

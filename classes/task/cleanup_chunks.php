@@ -65,7 +65,48 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge_export_files();
         $this->purge_expired_shares();
         $this->purge_old_nonces();
+        $this->purge_orphaned_publish_sources();
         $this->purge_old_transfers();
+    }
+
+    /**
+     * Remove any staged publication source whose transfer has finished (completed,
+     * failed or cancelled) or no longer exists. Success and cancellation delete the
+     * source directly; this sweep is the backstop for a failed publish, so a large
+     * plaintext backup is never left behind.
+     *
+     * @return void
+     */
+    private function purge_orphaned_publish_sources(): void {
+        global $DB;
+        $fs = get_file_storage();
+        $sysid = \context_system::instance()->id;
+        $finished = [
+            \repository_largefile\local\transfer_manager::STATUS_COMPLETED,
+            \repository_largefile\local\transfer_manager::STATUS_FAILED,
+            \repository_largefile\local\transfer_manager::STATUS_CANCELLED,
+        ];
+        $rs = $DB->get_recordset_select(
+            'files',
+            "component = :component AND filearea = :filearea AND contextid = :ctx AND filename <> '.'",
+            [
+                'component' => 'repository_largefile',
+                'filearea' => \repository_largefile\local\transfer_manager::PENDING_FILEAREA,
+                'ctx' => $sysid,
+            ],
+            '',
+            'id, itemid'
+        );
+        foreach ($rs as $filerec) {
+            $status = $DB->get_field('repository_largefile_transfers', 'status', ['id' => $filerec->itemid]);
+            if ($status === false || in_array($status, $finished, true)) {
+                $file = $fs->get_file_by_id($filerec->id);
+                if ($file) {
+                    $file->delete();
+                }
+            }
+        }
+        $rs->close();
     }
 
     /**

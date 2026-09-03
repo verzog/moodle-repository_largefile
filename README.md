@@ -131,9 +131,10 @@ hand to the peer.
 Encrypting a multi-gigabyte backup takes longer than a web request may last, so
 **Create in the background** is on by default: the backup is encrypted on the
 server as a queued transfer (run by cron, so cron must be enabled) rather than in
-the request, and its share link appears on the **Transfers** page when it is ready
-— avoiding a gateway timeout (504) on a large file. Untick it to create a small
-share inline and get the link straight away.
+the request — avoiding a gateway timeout (504) on a large file. The job is tracked
+under *Backups being published* on this page, and its share link appears in the
+shares list when it is ready. Untick it to create a small share inline and get the
+link straight away.
 
 **Importing (receiver).** On the **Import a shared backup** page, choose the peer and
 paste the link. The plugin fetches the metadata and ciphertext through Moodle's
