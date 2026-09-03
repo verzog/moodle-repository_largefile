@@ -2,6 +2,15 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.1 — 2026-09-03
+
+Bug fix: the upload dialogue failed to load with JavaScript caching turned off
+(developer mode). With no source map beside `amd/build/upload.min.js`, Moodle's
+dev-mode loader served the ES6 `amd/src/upload.js` directly ("Cannot use import
+statement outside a module" / "No define call for repository_largefile/upload").
+Ships a source map beside the built module so the loader serves the built AMD in
+every mode. (A future `grunt amd` regenerates the map with full line mappings.)
+
 ## 0.3.0 — 2026-09-03
 
 Adds **scheduled, unattended server-side transfers** and a **site-wide monitor**.
