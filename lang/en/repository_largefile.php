@@ -40,6 +40,7 @@ $string['errordownloadfailed'] = 'The file could not be downloaded from that URL
 $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that URL.';
 $string['errordownloadtoobig'] = 'The file at that URL is larger than the site upload limit.';
 $string['erroremptyfile'] = 'The selected file is empty.';
+$string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
 $string['errorsharedecrypt'] = 'The shared backup could not be decrypted. The pairing secret may be wrong, or the file '
@@ -48,6 +49,8 @@ $string['errorshareencrypt'] = 'The file could not be encrypted for sharing.';
 $string['errorshareexpired'] = 'This share has expired or reached its download limit.';
 $string['errorsharefetch'] = 'The shared backup could not be fetched from the peer. Check the link and that the peer '
     . 'site is reachable.';
+$string['errorsharehostmismatch'] = 'The share link\'s host does not match this peer\'s registered site URL. Import the '
+    . 'link from the peer it belongs to, or correct the peer\'s site URL.';
 $string['errorshareintegrity'] = 'The decrypted backup did not match its expected checksum, so it was discarded.';
 $string['errorshareinvalidurl'] = 'That is not a valid share link.';
 $string['errorsharenofile'] = 'The shared file is no longer available on the sending site.';
@@ -98,6 +101,11 @@ $string['peersecret'] = 'Shared secret';
 $string['peersecret_help'] = 'A long random string known to both sites, exchanged out of band (not over email in the '
     . 'clear). It is stored encrypted and never travels in a link — it only signs requests. Leave blank when editing to '
     . 'keep the current secret.';
+$string['peerurl'] = 'Site URL';
+$string['peerurl_help'] = 'The peer site\'s address, for example https://peer.example.org. Its host is the one address '
+    . 'allowed past this site\'s outgoing request block when importing that peer\'s share, so a peer on a private or '
+    . 'internal network can be reached without weakening protection for any other host. A share link is only accepted if '
+    . 'its host matches this URL.';
 $string['pluginname'] = 'Large file (URL or chunked upload)';
 $string['pluginname_help'] = 'Bring in a file that is too big for a normal upload: fetch it from a URL server-side, '
     . 'or upload it from your computer in small chunks that are not limited by this server\'s PHP upload size.';

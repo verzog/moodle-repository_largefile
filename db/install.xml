@@ -28,6 +28,7 @@
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Human-readable name of the peer site."/>
+        <FIELD NAME="baseurl" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="The peer's site URL; its host is the only one exempt from the site cURL block when importing a share."/>
         <FIELD NAME="sharedsecret" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="The pairing secret, encrypted at rest with the site key."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
