@@ -85,6 +85,39 @@ class chunk_store {
     }
 
     /**
+     * Create a new upload token owned by a specific user, and return its id.
+     *
+     * Unlike {@see create_token()} this does not read the current session, so it
+     * can be used by a server-side transfer (running under cron) to stage a file
+     * on a user's behalf. The caller is responsible for the user being allowed to
+     * receive the file.
+     *
+     * @param int $userid The user to own the token.
+     * @param int $contextid Context to record against the token.
+     * @param int $maxbytes Maximum accepted size in bytes, or -1 for unlimited.
+     * @return string The new token id.
+     */
+    public static function create_token_for(int $userid, int $contextid, int $maxbytes): string {
+        global $DB;
+
+        do {
+            $id = (string) random_int(1, 10000000000);
+        } while ($DB->record_exists(self::TABLE, ['id' => $id]));
+
+        $record = new \stdClass();
+        $record->id = $id;
+        $record->userid = $userid;
+        $record->contextid = $contextid;
+        $record->maxlength = $maxbytes;
+        $record->state = self::STATE_UNUSED;
+        $record->currentpos = 0;
+        $record->length = 0;
+        $record->lastmodified = time();
+        $DB->insert_record_raw(self::TABLE, $record, false, false, true);
+        return $id;
+    }
+
+    /**
      * Fetch one token row.
      *
      * @param string $id The token id.

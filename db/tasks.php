@@ -34,4 +34,16 @@ $tasks = [
         'dayofweek' => '*',
         'month' => '*',
     ],
+    [
+        // Runs due queued transfers. Every five minutes so a "run now" transfer
+        // starts promptly; a transfer scheduled for a quiet time waits for its
+        // scheduledtime regardless of how often this fires.
+        'classname' => 'repository_largefile\task\process_transfers',
+        'blocking' => 0,
+        'minute' => '*/5',
+        'hour' => '*',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
 ];

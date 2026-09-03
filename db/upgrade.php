@@ -45,5 +45,16 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090300, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090500) {
+        // Queue of scheduled/unattended server-side transfers.
+        $table = new xmldb_table('repository_largefile_transfers');
+        if (!$dbman->table_exists($table)) {
+            // The definition lives in db/install.xml; create from there.
+            $dbman->install_one_table_from_xmldb_file(__DIR__ . '/install.xml', 'repository_largefile_transfers');
+        }
+
+        upgrade_plugin_savepoint(true, 2026090500, 'repository', 'largefile');
+    }
+
     return true;
 }

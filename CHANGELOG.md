@@ -2,6 +2,30 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.0 — 2026-09-03
+
+Adds **scheduled, unattended server-side transfers** and a **site-wide monitor**.
+
+- **Queue a transfer** — a URL import or a peer-share import can be queued to run
+  **on the server**, either as soon as possible or **at a scheduled time** (e.g.
+  overnight), so you can start it and walk away. A URL import stages the fetched
+  file into your large-file picker; a peer-share import is fetched, decrypted,
+  verified and saved to your private files. New `repository_largefile_transfers`
+  table, `transfer_manager`/`transfer_runner`, and a `process_transfers` scheduled
+  task that runs due transfers (every 5 minutes; a scheduled transfer waits for
+  its time).
+- **Site-wide monitor** — a new *Transfers* page (linked from the plugin's
+  configuration page) shows every chunked upload in progress and every queued,
+  running or finished transfer across the site, and lets an admin cancel a queued
+  transfer or clear a finished one.
+- **Navigation guard** — the chunked uploader now warns before you navigate away
+  from an upload still in progress (a local file can only be read by the open
+  page). True background upload of a *local* file is not possible in the browser;
+  the unattended path is the server-side transfers above.
+- New `transfer_completed` event; the cleanup task prunes finished transfers after
+  a week; privacy provider declares, exports and erases transfer records; unit
+  tests for the transfer queue. Version 0.3.0.
+
 ## 0.2.1 — 2026-09-03
 
 Bug fix and admin-UI tidy-up.
