@@ -317,6 +317,20 @@ const openUploadModal = async(data) => {
         }
     };
 
+    // A file on the user's computer is read by this page, so leaving it abandons a
+    // running chunked upload. Warn before navigating away while one is in flight.
+    // (There is no such limit on the server-side scheduled transfers, which is the
+    // supported unattended path — see the Transfers page.)
+    const beforeUnload = (e) => {
+        if (busy) {
+            e.preventDefault();
+            e.returnValue = '';
+            return '';
+        }
+        return undefined;
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+
     root.on(ModalEvents.shown, () => {
         selectedFile = null;
         busy = false;
@@ -333,6 +347,7 @@ const openUploadModal = async(data) => {
     // Cancelling or closing the dialogue aborts any in-flight transfer.
     root.on(ModalEvents.cancel, abort);
     root.on(ModalEvents.hidden, () => {
+        window.removeEventListener('beforeunload', beforeUnload);
         abort();
         modal.destroy();
     });

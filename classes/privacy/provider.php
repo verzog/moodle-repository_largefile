@@ -64,6 +64,12 @@ class provider implements
             'filename' => 'privacy:metadata:repository_largefile_shares:filename',
             'timecreated' => 'privacy:metadata:repository_largefile_shares:timecreated',
         ], 'privacy:metadata:repository_largefile_shares');
+        $collection->add_database_table('repository_largefile_transfers', [
+            'userid' => 'privacy:metadata:repository_largefile_transfers:userid',
+            'type' => 'privacy:metadata:repository_largefile_transfers:type',
+            'filename' => 'privacy:metadata:repository_largefile_transfers:filename',
+            'timecreated' => 'privacy:metadata:repository_largefile_transfers:timecreated',
+        ], 'privacy:metadata:repository_largefile_transfers');
         // A staged payload's bytes are streamed into an export through the file
         // API (a short-lived copy the cleanup task removes).
         $collection->add_subsystem_link('core_files', [], 'privacy:metadata:core_files');
@@ -82,10 +88,14 @@ class provider implements
             "SELECT DISTINCT contextid FROM {repository_largefile_chunks} WHERE userid = :userid AND contextid IS NOT NULL",
             ['userid' => $userid]
         );
-        // Shares are created at the system context.
+        // Shares and transfers are created at the system context.
         $contextlist->add_from_sql(
             "SELECT DISTINCT :sysctx AS contextid FROM {repository_largefile_shares} WHERE userid = :userid",
             ['sysctx' => \context_system::instance()->id, 'userid' => $userid]
+        );
+        $contextlist->add_from_sql(
+            "SELECT DISTINCT :sysctxt AS contextid FROM {repository_largefile_transfers} WHERE userid = :userid",
+            ['sysctxt' => \context_system::instance()->id, 'userid' => $userid]
         );
         return $contextlist;
     }
@@ -105,6 +115,7 @@ class provider implements
         );
         if ($context instanceof \context_system) {
             $userlist->add_from_sql('userid', "SELECT userid FROM {repository_largefile_shares}", []);
+            $userlist->add_from_sql('userid', "SELECT userid FROM {repository_largefile_transfers}", []);
         }
     }
 
@@ -194,6 +205,22 @@ class provider implements
                     (object) ['shares' => $sharedata]
                 );
             }
+            $transfers = $DB->get_records('repository_largefile_transfers', ['userid' => $user->id]);
+            if ($transfers) {
+                $transferdata = [];
+                foreach ($transfers as $transfer) {
+                    $transferdata[] = (object) [
+                        'type' => $transfer->type,
+                        'filename' => $transfer->filename,
+                        'status' => $transfer->status,
+                        'timecreated' => userdate((int) $transfer->timecreated),
+                    ];
+                }
+                \core_privacy\local\request\writer::with_context($system)->export_data(
+                    [get_string('transfers', 'repository_largefile')],
+                    (object) ['transfers' => $transferdata]
+                );
+            }
         }
     }
 
@@ -207,6 +234,7 @@ class provider implements
         self::delete_rows(['contextid' => $context->id]);
         if ($context instanceof \context_system) {
             self::delete_shares('1 = 1', []);
+            self::delete_transfers('1 = 1', []);
         }
     }
 
@@ -222,6 +250,7 @@ class provider implements
             self::delete_rows(['contextid' => $context->id, 'userid' => $userid]);
             if ($context instanceof \context_system) {
                 self::delete_shares('userid = :userid', ['userid' => $userid]);
+                self::delete_transfers('userid = :userid', ['userid' => $userid]);
             }
         }
     }
@@ -251,6 +280,7 @@ class provider implements
         }
         if ($context instanceof \context_system) {
             self::delete_shares("userid $insql", $params);
+            self::delete_transfers("userid $insql", $params);
         }
     }
 
@@ -281,5 +311,17 @@ class provider implements
         foreach ($ids as $id) {
             \repository_largefile\local\share_manager::delete((int) $id);
         }
+    }
+
+    /**
+     * Delete transfer rows matching a select clause.
+     *
+     * @param string $select A SQL where-clause fragment.
+     * @param array $params Named parameters for the clause.
+     * @return void
+     */
+    private static function delete_transfers(string $select, array $params): void {
+        global $DB;
+        $DB->delete_records_select('repository_largefile_transfers', $select, $params);
     }
 }

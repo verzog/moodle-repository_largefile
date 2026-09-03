@@ -256,6 +256,10 @@ class repository_largefile extends repository {
                 new \moodle_url('/repository/largefile/import.php'),
                 get_string('importshared', 'repository_largefile')
             ),
+            \html_writer::link(
+                new \moodle_url('/repository/largefile/transfers.php'),
+                get_string('transfers', 'repository_largefile')
+            ),
         ];
         $mform->addElement('header', 'largefilesharingheader', get_string('sharingmanagement', 'repository_largefile'));
         $mform->addElement('static', 'largefilelinks', '', \html_writer::alist($links));

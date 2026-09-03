@@ -65,6 +65,17 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge_export_files();
         $this->purge_expired_shares();
         $this->purge_old_nonces();
+        $this->purge_old_transfers();
+    }
+
+    /**
+     * Drop finished transfers (completed, failed or cancelled) once they are a
+     * week old, so the monitor keeps a recent history without growing forever.
+     *
+     * @return void
+     */
+    private function purge_old_transfers(): void {
+        \repository_largefile\local\transfer_manager::purge_old(time() - (7 * DAYSECS));
     }
 
     /**

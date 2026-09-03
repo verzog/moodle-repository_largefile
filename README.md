@@ -137,6 +137,31 @@ context, with no archetypes) — grant them explicitly to the administrators who
 should manage transfers. Expired or exhausted shares and stale nonces are removed
 by the `cleanup_chunks` scheduled task.
 
+## Scheduled, unattended transfers
+
+A **URL import** and a **peer-share import** both run entirely on the server, so
+they can be **queued to run unattended** — right away, or **at a quiet time such
+as overnight** — from the **Transfers** page (linked from the plugin's
+configuration page at *Site administration > Plugins > Repositories > Large
+file*). Queue one and close the browser: the `process_transfers` scheduled task
+picks it up (a scheduled transfer waits for its chosen time), fetches it, and — for
+a URL import — stages the file into your large-file picker, or — for a peer-share
+import — decrypts, verifies and saves it to your private files ready to restore.
+
+The **Transfers** page is also a **site-wide monitor**: it lists every chunked
+upload currently streaming in and every queued, running or finished transfer,
+with their owner and status, and lets an administrator cancel a queued transfer
+or clear a finished one. Finished transfers are pruned after a week by the cleanup
+task.
+
+**Why local uploads can't be unattended.** A file on your own computer can only be
+read by the page that's open, so the chunked uploader now *warns you before you
+navigate away* from an upload still in progress — but it cannot keep uploading a
+local file once the page is gone (a browser limitation that no server can work
+around; Background Fetch does not fit the resumable multi-request chunk protocol).
+When you need "start it and walk away", upload from a URL or a peer share and use a
+scheduled transfer, which runs on the server with no page open.
+
 ## Settings
 
 | Setting | Default | Purpose |
