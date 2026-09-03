@@ -112,12 +112,13 @@ add the other site with its **Site URL** (e.g. `https://peer.example.org`), and
 paste the same shared secret (≥24 characters) on both. The secret is stored
 encrypted with the site key (`\core\encryption`), never in the clear.
 
-The Site URL does double duty: a share link is accepted only if its host matches
-the peer it is imported from, and that one host is the sole address allowed past
-the cURL block below when importing that peer's share. So a peer on a private or
-internal network (a common self-hosting case) can be reached without loosening
-SSRF protection for any other host. Every other host — redirect targets included —
-stays subject to the site policy.
+The Site URL does double duty: a share link is accepted only if it is on the same
+origin (scheme, host and port) as the peer it is imported from, and that one origin
+is the sole target allowed past the cURL block below when importing that peer's
+share. So a peer on a private or internal network (a common self-hosting case) can
+be reached without loosening SSRF protection for anything else. Every other host —
+and every other port or scheme on the same host, redirect targets included — stays
+subject to the site policy, so no other service on the peer machine is reachable.
 
 **Publishing (sender).** On the **Backup shares** page, upload a backup (the
 chunked uploader in the picker handles files above the PHP limit), pick a peer,

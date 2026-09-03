@@ -67,6 +67,19 @@ final class share_client_test extends \advanced_testcase {
     }
 
     /**
+     * A share on the right host but a different port than registered is rejected.
+     *
+     * @return void
+     */
+    public function test_mismatched_port_is_rejected(): void {
+        $this->resetAfterTest();
+        $id = peer_manager::create('Partner', str_repeat('s', 24), 'https://peer.example.org:8443');
+
+        $this->expectException(\moodle_exception::class);
+        $this->invoke_peer_security($id, 'http://peer.example.org:2375/repository/largefile/share.php');
+    }
+
+    /**
      * A legacy peer with no registered site URL defers to the site default (null).
      *
      * @return void

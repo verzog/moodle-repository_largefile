@@ -26,7 +26,7 @@ namespace repository_largefile\local;
  */
 final class peer_curl_security_test extends \advanced_testcase {
     /**
-     * Block a host by name so the site policy is active without needing DNS.
+     * Block the peer host by name so the site policy is active without needing DNS.
      *
      * @return void
      */
@@ -38,15 +38,44 @@ final class peer_curl_security_test extends \advanced_testcase {
     }
 
     /**
-     * The one registered peer host is exempt even when the site policy blocks it.
+     * The one registered peer origin is exempt even when the site policy blocks it.
      *
      * @return void
      */
-    public function test_registered_peer_host_is_allowed(): void {
-        $helper = new peer_curl_security('peer.example.org');
+    public function test_registered_peer_origin_is_allowed(): void {
+        $helper = new peer_curl_security('https://peer.example.org');
         $this->assertFalse($helper->url_is_blocked('https://peer.example.org/repository/largefile/share.php?token=x'));
         // Host match is case-insensitive.
         $this->assertFalse($helper->url_is_blocked('https://PEER.example.org/share.php'));
+        // An explicit default port is the same origin.
+        $this->assertFalse($helper->url_is_blocked('https://peer.example.org:443/share.php'));
+    }
+
+    /**
+     * A non-default registered port is exempt, but only that exact port.
+     *
+     * @return void
+     */
+    public function test_registered_nondefault_port_is_scoped(): void {
+        $helper = new peer_curl_security('https://peer.example.org:8443');
+        // The registered origin (host + port + scheme) is allowed.
+        $this->assertFalse($helper->url_is_blocked('https://peer.example.org:8443/share.php'));
+        // A different port on the same host is NOT exempt — this is the SSRF guard.
+        $this->assertTrue($helper->url_is_blocked('http://peer.example.org:2375/'));
+        $this->assertTrue($helper->url_is_blocked('https://peer.example.org:9000/'));
+        // The scheme default port differs from the registered 8443, so it is blocked too.
+        $this->assertTrue($helper->url_is_blocked('https://peer.example.org/share.php'));
+    }
+
+    /**
+     * A different scheme on the same host and port is not exempt.
+     *
+     * @return void
+     */
+    public function test_scheme_must_match(): void {
+        $helper = new peer_curl_security('https://peer.example.org');
+        // HTTP on the same host resolves to port 80, not the registered 443.
+        $this->assertTrue($helper->url_is_blocked('http://peer.example.org/share.php'));
     }
 
     /**
@@ -55,19 +84,17 @@ final class peer_curl_security_test extends \advanced_testcase {
      * @return void
      */
     public function test_other_hosts_stay_blocked(): void {
-        $helper = new peer_curl_security('peer.example.org');
-        // A different, explicitly blocked host — e.g. a redirect target — stays blocked.
+        $helper = new peer_curl_security('https://peer.example.org');
         $this->assertTrue($helper->url_is_blocked('https://blocked.example.org/x'));
-        // An unparseable URL is treated as blocked.
         $this->assertTrue($helper->url_is_blocked('not a url'));
     }
 
     /**
-     * With no allowed host the helper behaves exactly like the site policy.
+     * With no usable allowed origin the helper behaves like the site policy.
      *
      * @return void
      */
-    public function test_empty_allowed_host_defers_to_site_policy(): void {
+    public function test_empty_allowed_origin_defers_to_site_policy(): void {
         $helper = new peer_curl_security('');
         $this->assertTrue($helper->url_is_blocked('https://peer.example.org/share.php'));
         $this->assertFalse($helper->url_is_blocked('https://ok.example.org/share.php'));

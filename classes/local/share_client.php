@@ -83,29 +83,30 @@ class share_client {
     /**
      * Build the cURL security helper for a peer fetch.
      *
-     * The share endpoint must live on the peer's registered site host, so it is
-     * checked against that host first. When a peer has a registered site URL, the
-     * returned helper exempts only that one host from the site's cURL block (so a
-     * peer on a private-range address is reachable while every other host, redirect
-     * targets included, stays blocked). A legacy peer with no registered URL gets
+     * The share endpoint must live on the peer's registered site origin (same
+     * scheme, host and port), so it is checked against that first. When a peer has
+     * a registered site URL, the returned helper exempts only that one origin from
+     * the site's cURL block (so a peer on a private-range address is reachable while
+     * every other host — and every other port or scheme on the same host, redirect
+     * targets included — stays blocked). A legacy peer with no registered URL gets
      * the site's default policy (null), so a public peer keeps working and a peer
      * behind the block must be given its site URL to become reachable.
      *
      * @param int $peerid The peer the share came from.
      * @param string $base The share endpoint base URL (scheme://host[:port]/path).
      * @return \core\files\curl_security_helper_base|null The scoped helper, or null for the site default.
-     * @throws \moodle_exception If the share host does not match the peer's registered site host.
+     * @throws \moodle_exception If the share URL is not on the peer's registered site origin.
      */
     private static function peer_security(int $peerid, string $base): ?\core\files\curl_security_helper_base {
-        $peerhost = peer_manager::get_host($peerid);
-        if ($peerhost === null) {
+        $peer = peer_manager::get($peerid);
+        if (!$peer || empty($peer->baseurl)) {
             return null;
         }
-        $host = \core_text::strtolower((string) parse_url($base, PHP_URL_HOST));
-        if ($host === '' || $host !== $peerhost) {
+        $security = new peer_curl_security($peer->baseurl);
+        if (!$security->allows($base)) {
             throw new \moodle_exception('errorsharehostmismatch', 'repository_largefile');
         }
-        return new peer_curl_security($peerhost);
+        return $security;
     }
 
     /**
