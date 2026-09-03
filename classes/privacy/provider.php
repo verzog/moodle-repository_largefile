@@ -59,6 +59,11 @@ class provider implements
             'filename' => 'privacy:metadata:repository_largefile_chunks:filename',
             'lastmodified' => 'privacy:metadata:repository_largefile_chunks:lastmodified',
         ], 'privacy:metadata:repository_largefile_chunks');
+        $collection->add_database_table('repository_largefile_shares', [
+            'userid' => 'privacy:metadata:repository_largefile_shares:userid',
+            'filename' => 'privacy:metadata:repository_largefile_shares:filename',
+            'timecreated' => 'privacy:metadata:repository_largefile_shares:timecreated',
+        ], 'privacy:metadata:repository_largefile_shares');
         // A staged payload's bytes are streamed into an export through the file
         // API (a short-lived copy the cleanup task removes).
         $collection->add_subsystem_link('core_files', [], 'privacy:metadata:core_files');
@@ -77,6 +82,11 @@ class provider implements
             "SELECT DISTINCT contextid FROM {repository_largefile_chunks} WHERE userid = :userid AND contextid IS NOT NULL",
             ['userid' => $userid]
         );
+        // Shares are created at the system context.
+        $contextlist->add_from_sql(
+            "SELECT DISTINCT :sysctx AS contextid FROM {repository_largefile_shares} WHERE userid = :userid",
+            ['sysctx' => \context_system::instance()->id, 'userid' => $userid]
+        );
         return $contextlist;
     }
 
@@ -93,6 +103,9 @@ class provider implements
             "SELECT userid FROM {repository_largefile_chunks} WHERE contextid = :contextid AND userid IS NOT NULL",
             ['contextid' => $context->id]
         );
+        if ($context instanceof \context_system) {
+            $userlist->add_from_sql('userid', "SELECT userid FROM {repository_largefile_shares}", []);
+        }
     }
 
     /**
@@ -155,6 +168,33 @@ class provider implements
             }
             $writer->export_data($subcontext, (object) ['uploads' => $data]);
         }
+
+        // Shares live at the system context; export their metadata when approved.
+        $system = \context_system::instance();
+        $approvedsystem = false;
+        foreach ($contextlist->get_contexts() as $context) {
+            if ((int) $context->id === (int) $system->id) {
+                $approvedsystem = true;
+                break;
+            }
+        }
+        if ($approvedsystem) {
+            $shares = $DB->get_records('repository_largefile_shares', ['userid' => $user->id]);
+            if ($shares) {
+                $sharedata = [];
+                foreach ($shares as $share) {
+                    $sharedata[] = (object) [
+                        'filename' => $share->filename,
+                        'peerid' => (int) $share->peerid,
+                        'timecreated' => userdate((int) $share->timecreated),
+                    ];
+                }
+                \core_privacy\local\request\writer::with_context($system)->export_data(
+                    [get_string('manageshares', 'repository_largefile')],
+                    (object) ['shares' => $sharedata]
+                );
+            }
+        }
     }
 
     /**
@@ -165,6 +205,9 @@ class provider implements
      */
     public static function delete_data_for_all_users_in_context(\context $context): void {
         self::delete_rows(['contextid' => $context->id]);
+        if ($context instanceof \context_system) {
+            self::delete_shares('1 = 1', []);
+        }
     }
 
     /**
@@ -177,6 +220,9 @@ class provider implements
         $userid = $contextlist->get_user()->id;
         foreach ($contextlist->get_contexts() as $context) {
             self::delete_rows(['contextid' => $context->id, 'userid' => $userid]);
+            if ($context instanceof \context_system) {
+                self::delete_shares('userid = :userid', ['userid' => $userid]);
+            }
         }
     }
 
@@ -194,11 +240,17 @@ class provider implements
             return;
         }
         [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
-        $params['contextid'] = $context->id;
-        $select = "contextid = :contextid AND userid $insql";
-        $records = $DB->get_records_select('repository_largefile_chunks', $select, $params);
+        $chunkparams = $params + ['contextid' => $context->id];
+        $records = $DB->get_records_select(
+            'repository_largefile_chunks',
+            "contextid = :contextid AND userid $insql",
+            $chunkparams
+        );
         foreach ($records as $record) {
             \repository_largefile\chunk_store::delete((string) $record->id);
+        }
+        if ($context instanceof \context_system) {
+            self::delete_shares("userid $insql", $params);
         }
     }
 
@@ -213,6 +265,21 @@ class provider implements
         $records = $DB->get_records('repository_largefile_chunks', $conditions);
         foreach ($records as $record) {
             \repository_largefile\chunk_store::delete((string) $record->id);
+        }
+    }
+
+    /**
+     * Delete shares matching a select clause, including their encrypted files.
+     *
+     * @param string $select A SQL where-clause fragment.
+     * @param array $params Named parameters for the clause.
+     * @return void
+     */
+    private static function delete_shares(string $select, array $params): void {
+        global $DB;
+        $ids = $DB->get_fieldset_select('repository_largefile_shares', 'id', $select, $params);
+        foreach ($ids as $id) {
+            \repository_largefile\local\share_manager::delete((int) $id);
         }
     }
 }

@@ -33,4 +33,22 @@ $capabilities = [
             'user' => CAP_ALLOW,
         ],
     ],
+
+    // Manage trusted peers and publish/revoke backup shares to them. A trusted,
+    // site-level action (it exposes site content to another site), so no role
+    // holds it by default — grant it to a manager or administrator.
+    'repository/largefile:share' => [
+        'riskbitmask'  => RISK_PERSONAL | RISK_DATALOSS,
+        'captype'      => 'write',
+        'contextlevel' => CONTEXT_SYSTEM,
+        'archetypes'   => [],
+    ],
+
+    // Import a backup shared by a trusted peer into this site.
+    'repository/largefile:import' => [
+        'riskbitmask'  => RISK_PERSONAL,
+        'captype'      => 'write',
+        'contextlevel' => CONTEXT_SYSTEM,
+        'archetypes'   => [],
+    ],
 ];
