@@ -49,6 +49,15 @@ if ($action === 'revoke' && $id) {
     share_manager::delete($id);
     redirect($baseurl, get_string('sharedeleted', 'repository_largefile'));
 }
+if ($action === 'cancelpublish' && $id) {
+    require_sesskey();
+    // A publisher may cancel only their own queued publication.
+    $pending = transfer_manager::get($id);
+    if ($pending && $pending->type === transfer_manager::TYPE_PUBLISH && (int) $pending->userid === (int) $USER->id) {
+        transfer_manager::cancel($id);
+    }
+    redirect($baseurl, get_string('transfercancelled', 'repository_largefile'));
+}
 
 $peers = peer_manager::menu();
 $newshare = null;
@@ -65,24 +74,26 @@ if ($peers) {
             // Encrypt and publish on the server, immune to the web request timeout
             // that a large backup would otherwise hit. The file stays in the draft
             // area (no copy of a large backup here) and is referenced by its draft
-            // id; the scheduled task encrypts it and the link lands on Transfers.
+            // id; the scheduled task encrypts it and the link appears on this page.
             transfer_manager::create(
                 transfer_manager::TYPE_PUBLISH,
                 (int) $USER->id,
                 [
                     'peerid' => (int) $data->peerid,
                     'draftid' => (int) $data->sharefile,
-                    'expires' => empty($data->expiry) ? 0 : time() + (int) $data->expiry,
+                    // Store the requested duration, not an absolute time: the runner
+                    // starts the expiry when the share is actually created.
+                    'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
                     'maxdownloads' => max(0, (int) $data->maxdownloads),
                 ],
                 0,
                 $context->id,
                 $file->get_filename()
             );
-            redirect(
-                new moodle_url('/repository/largefile/transfers.php'),
-                get_string('sharequeued', 'repository_largefile')
-            );
+            // Return to this page (the publisher holds the sharing capability, which
+            // the site-wide Transfers monitor does not require); the pending job and
+            // then its link appear below.
+            redirect($baseurl, get_string('sharequeued', 'repository_largefile'));
         }
         if ($file) {
             $temp = make_request_directory() . '/' . $file->get_filename();
@@ -122,12 +133,49 @@ if (!$peers) {
     die;
 }
 
+// Backups still being encrypted in the background (this user's own jobs), so the
+// publisher can watch progress and see the link land without leaving this page.
+$pending = array_filter(
+    transfer_manager::list_for_user((int) $USER->id),
+    fn($t) => $t->type === transfer_manager::TYPE_PUBLISH && $t->status !== transfer_manager::STATUS_COMPLETED
+);
+if ($pending) {
+    echo $OUTPUT->heading(get_string('pendingpublications', 'repository_largefile'), 3);
+    $ptable = new html_table();
+    $ptable->head = [
+        get_string('sharefilecol', 'repository_largefile'),
+        get_string('transferstatus', 'repository_largefile'),
+        get_string('transferoutcome', 'repository_largefile'),
+        get_string('actions'),
+    ];
+    foreach ($pending as $job) {
+        $outcome = $job->status === transfer_manager::STATUS_FAILED
+            ? html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger'])
+            : '—';
+        $cancel = $job->status === transfer_manager::STATUS_SCHEDULED
+            ? html_writer::link(
+                new moodle_url($baseurl, ['action' => 'cancelpublish', 'id' => $job->id, 'sesskey' => sesskey()]),
+                get_string('cancel')
+            )
+            : '';
+        $ptable->data[] = [
+            format_string((string) $job->filename),
+            get_string('transferstatus_' . $job->status, 'repository_largefile'),
+            $outcome,
+            $cancel,
+        ];
+    }
+    echo html_writer::table($ptable);
+}
+
 $shares = share_manager::list_all();
 if ($shares) {
+    echo $OUTPUT->heading(get_string('sharesheading', 'repository_largefile'), 3);
     $table = new html_table();
     $table->head = [
         get_string('sharefilecol', 'repository_largefile'),
         get_string('sharepeer', 'repository_largefile'),
+        get_string('sharelinkcol', 'repository_largefile'),
         get_string('shareexpirescol', 'repository_largefile'),
         get_string('sharedownloadscol', 'repository_largefile'),
         get_string('actions'),
@@ -139,6 +187,7 @@ if ($shares) {
         $downloads = (int) $share->maxdownloads === 0
             ? (int) $share->downloadcount . ' / ' . get_string('unlimited', 'repository_largefile')
             : (int) $share->downloadcount . ' / ' . (int) $share->maxdownloads;
+        $link = (new moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
         $revoke = html_writer::link(
             new moodle_url($baseurl, ['action' => 'revoke', 'id' => $share->id, 'sesskey' => sesskey()]),
             get_string('revokeshare', 'repository_largefile'),
@@ -147,6 +196,7 @@ if ($shares) {
         $table->data[] = [
             format_string($share->filename),
             format_string($share->peername ?? ''),
+            html_writer::tag('code', s($link), ['class' => 'text-break']),
             $expiry,
             $downloads,
             $revoke,

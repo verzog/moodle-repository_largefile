@@ -41,14 +41,26 @@ $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/transfers.php');
 manage_page::setup($baseurl, get_string('transfers', 'repository_largefile'));
 
+// A share publication belongs to the sharing capability, not the import one this
+// page requires, so an import-only operator neither sees nor can act on it.
+$canshare = has_capability('repository/largefile:share', $context);
+$mayacton = function (int $transferid) use ($canshare): bool {
+    $transfer = transfer_manager::get($transferid);
+    return $transfer && ($transfer->type !== transfer_manager::TYPE_PUBLISH || $canshare);
+};
+
 if ($action === 'cancel' && $id) {
     require_sesskey();
-    transfer_manager::cancel($id);
+    if ($mayacton($id)) {
+        transfer_manager::cancel($id);
+    }
     redirect($baseurl, get_string('transfercancelled', 'repository_largefile'));
 }
 if ($action === 'remove' && $id) {
     require_sesskey();
-    transfer_manager::delete($id);
+    if ($mayacton($id)) {
+        transfer_manager::delete($id);
+    }
     redirect($baseurl, get_string('transferremoved', 'repository_largefile'));
 }
 
@@ -131,6 +143,10 @@ if ($transfers) {
         get_string('actions'),
     ];
     foreach ($transfers as $transfer) {
+        // A publication is only shown to a user who holds the sharing capability.
+        if ($transfer->type === transfer_manager::TYPE_PUBLISH && !$canshare) {
+            continue;
+        }
         $when = (int) $transfer->scheduledtime <= (int) $transfer->timecreated
             ? get_string('transferwhennow', 'repository_largefile')
             : userdate((int) $transfer->scheduledtime);

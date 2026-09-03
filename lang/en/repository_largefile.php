@@ -107,6 +107,7 @@ $string['peerurl_help'] = 'The peer site\'s address, for example https://peer.ex
     . 'allowed past this site\'s outgoing request block when importing that peer\'s share, so a peer on a private or '
     . 'internal network can be reached without weakening protection for any other host. A share link is only accepted if '
     . 'its host matches this URL.';
+$string['pendingpublications'] = 'Backups being published';
 $string['pluginname'] = 'Large file (URL or chunked upload)';
 $string['pluginname_help'] = 'Bring in a file that is too big for a normal upload: fetch it from a URL server-side, '
     . 'or upload it from your computer in small chunks that are not limited by this server\'s PHP upload size.';
@@ -155,6 +156,7 @@ $string['shareexpiry_help'] = 'How long the share can be downloaded before it st
     . 'unticked for a share that never expires.';
 $string['sharefile'] = 'File to share';
 $string['sharefilecol'] = 'File';
+$string['sharelinkcol'] = 'Share link';
 $string['sharelinkinfo'] = 'Give this link to the receiving site\'s administrator. They also need this site set up as a '
     . 'trusted peer there, using the same shared secret.';
 $string['sharemaxdownloads'] = 'Maximum downloads';
@@ -165,8 +167,9 @@ $string['sharepublishbackground'] = 'Create in the background';
 $string['sharepublishbackground_help'] = 'Recommended for large backups. The backup is encrypted on the server rather '
     . 'than in your browser, so creating the share is not cut off by a web server request timeout (a 504 error). Its '
     . 'share link appears on the Transfers page when it is ready.';
-$string['sharequeued'] = 'The share is being created in the background. Its link will appear on the Transfers page when it '
-    . 'is ready.';
+$string['sharequeued'] = 'The share is being created in the background. It will appear under "Backups being published" '
+    . 'below, and its link in the shares list, when it is ready.';
+$string['sharesheading'] = 'Published shares';
 $string['sharingmanagement'] = 'Backup sharing';
 $string['tabupload'] = 'Upload a large file';
 $string['taburl'] = 'From a URL';

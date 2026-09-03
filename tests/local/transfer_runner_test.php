@@ -96,10 +96,11 @@ final class transfer_runner_test extends \advanced_testcase {
             'userid' => $user->id,
         ], 'PLAINTEXT-BACKUP-CONTENTS');
 
+        $before = time();
         $id = transfer_manager::create(
             transfer_manager::TYPE_PUBLISH,
             (int) $user->id,
-            ['peerid' => $peerid, 'draftid' => $draftid, 'expires' => 0, 'maxdownloads' => 1],
+            ['peerid' => $peerid, 'draftid' => $draftid, 'expiryduration' => DAYSECS, 'maxdownloads' => 1],
             0,
             \context_system::instance()->id,
             'backup.mbz'
@@ -113,6 +114,9 @@ final class transfer_runner_test extends \advanced_testcase {
         // A share row was created, and the plaintext draft source was removed.
         $this->assertEquals(1, $DB->count_records('repository_largefile_shares'));
         $this->assertFalse($fs->file_exists($usercontext->id, 'user', 'draft', $draftid, '/', 'backup.mbz'));
+        // The expiry is measured from when the share was created, not when queued.
+        $share = $DB->get_record('repository_largefile_shares', []);
+        $this->assertGreaterThanOrEqual($before + DAYSECS, (int) $share->expires);
     }
 
     /**
@@ -129,7 +133,7 @@ final class transfer_runner_test extends \advanced_testcase {
         $id = transfer_manager::create(
             transfer_manager::TYPE_PUBLISH,
             (int) $user->id,
-            ['peerid' => $peerid, 'draftid' => 999999, 'expires' => 0, 'maxdownloads' => 1],
+            ['peerid' => $peerid, 'draftid' => 999999, 'expiryduration' => 0, 'maxdownloads' => 1],
             0,
             \context_system::instance()->id,
             'gone.mbz'

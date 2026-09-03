@@ -13,6 +13,12 @@ All notable changes to `repository_largefile` are documented here.
   The upload is referenced in place (no second copy of a large backup is made) and
   is removed once it has been encrypted. A new *Backup share (publish)* transfer
   type; runs under the same `process_transfers` scheduled task, so it needs cron.
+  A **Backups being published** section on the page tracks each queued job (and
+  lets you cancel one), the shares list now shows each share's **link** so it can
+  be retrieved at any time, and the expiry is measured from when the share is
+  actually created (not from when it was queued). Publications stay within the
+  sharing capability — an import-only operator on the Transfers monitor does not
+  see or act on them.
 - **Clearer "could not be fetched" message on import.** When a share import fails
   to reach the peer, the message now also points at the peer's **Site URL** — a
   share on a private or internal address is only reachable once that URL is

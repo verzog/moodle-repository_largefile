@@ -148,14 +148,17 @@ class transfer_runner {
      * draft cleanup, so a failure leaves no orphaned copy behind).
      *
      * @param \stdClass $transfer The transfer row.
-     * @param array $payload Decoded payload; expects 'peerid', 'draftid', 'expires' and 'maxdownloads'.
+     * @param array $payload Decoded payload; expects 'peerid', 'draftid', 'expiryduration' and 'maxdownloads'.
      * @return string The share link to hand to the peer.
      * @throws \moodle_exception If the staged file is gone or encryption fails.
      */
     private static function run_share_publish(\stdClass $transfer, array $payload): string {
         $peerid = (int) ($payload['peerid'] ?? 0);
         $draftid = (int) ($payload['draftid'] ?? 0);
-        $expires = (int) ($payload['expires'] ?? 0);
+        // The expiry is measured from when the share actually exists, not from when
+        // it was queued, so a cron delay does not eat into the share's lifetime.
+        $duration = (int) ($payload['expiryduration'] ?? 0);
+        $expires = $duration > 0 ? time() + $duration : 0;
         $maxdownloads = (int) ($payload['maxdownloads'] ?? 0);
 
         $fs = get_file_storage();
