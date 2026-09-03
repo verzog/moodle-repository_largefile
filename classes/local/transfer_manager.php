@@ -63,6 +63,9 @@ class transfer_manager {
     /** @var string Cancelled by a user before it ran. */
     public const STATUS_CANCELLED = 'cancelled';
 
+    /** @var int Attempts after which a repeatedly interrupted transfer is failed. */
+    public const MAX_ATTEMPTS = 3;
+
     /**
      * Queue a transfer.
      *
@@ -90,7 +93,12 @@ class transfer_manager {
             'filename' => $filename !== '' ? $filename : null,
             'payload' => json_encode($payload),
             'status' => self::STATUS_SCHEDULED,
-            'scheduledtime' => max(0, $scheduledtime),
+            // An immediate transfer's effective due time is now, so it is ordered
+            // chronologically against explicitly scheduled ones rather than always
+            // jumping the queue (which a steady stream of immediates could otherwise
+            // use to starve an overnight transfer). "Run now" is recognised for
+            // display by scheduledtime being no later than timecreated.
+            'scheduledtime' => $scheduledtime > 0 ? $scheduledtime : time(),
             'attempts' => 0,
             'timecreated' => time(),
         ];
@@ -144,21 +152,64 @@ class transfer_manager {
     }
 
     /**
-     * Mark a transfer as running and count the attempt.
+     * Atomically claim a scheduled transfer for running, counting the attempt.
+     *
+     * The scheduled-to-running move is guarded on the row still being scheduled,
+     * so a transfer an administrator cancelled (or another run already took) while
+     * an earlier one in the same batch was downloading is not resurrected: the
+     * guarded update matches nothing and the claim fails, and the caller then skips
+     * the stale work.
      *
      * @param int $id The transfer id.
+     * @return bool True if this call claimed the transfer; false if it was no
+     *              longer scheduled (cancelled, already running, or gone).
+     */
+    public static function claim(int $id): bool {
+        global $DB;
+        $transaction = $DB->start_delegated_transaction();
+        // Lock the row while still scheduled; a concurrent cancel blocks until we
+        // commit and then sees it running, so it cannot cancel work already taken,
+        // and a second claimer finds nothing to lock and gives up.
+        $sql = "SELECT * FROM {" . self::TABLE . "} WHERE id = :id AND status = :status FOR UPDATE";
+        $transfer = $DB->get_record_sql($sql, ['id' => $id, 'status' => self::STATUS_SCHEDULED], IGNORE_MISSING);
+        if (!$transfer) {
+            $transaction->allow_commit();
+            return false;
+        }
+        $DB->update_record(self::TABLE, (object) [
+            'id' => $id,
+            'status' => self::STATUS_RUNNING,
+            'timestarted' => time(),
+            'attempts' => (int) $transfer->attempts + 1,
+        ]);
+        $transaction->allow_commit();
+        return true;
+    }
+
+    /**
+     * Return transfers stuck in the running state past a lease to the queue.
+     *
+     * A run interrupted by a worker restart or host shutdown leaves its row
+     * running forever; nothing else would ever pick it up. Past the lease, such a
+     * row is rescheduled to be retried, or failed once it has used up its attempts.
+     *
+     * @param int $before Reclaim running rows whose timestarted is before this.
      * @return void
      */
-    public static function mark_running(int $id): void {
+    public static function reclaim_stale(int $before): void {
         global $DB;
-        $transfer = self::get($id);
-        if (!$transfer) {
-            return;
+        $rows = $DB->get_records_select(
+            self::TABLE,
+            "status = :running AND timestarted IS NOT NULL AND timestarted < :before",
+            ['running' => self::STATUS_RUNNING, 'before' => $before]
+        );
+        foreach ($rows as $row) {
+            if ((int) $row->attempts >= self::MAX_ATTEMPTS) {
+                self::mark_failed((int) $row->id, get_string('errortransferstalled', 'repository_largefile'));
+            } else {
+                $DB->set_field(self::TABLE, 'status', self::STATUS_SCHEDULED, ['id' => $row->id]);
+            }
         }
-        $transfer->status = self::STATUS_RUNNING;
-        $transfer->attempts = (int) $transfer->attempts + 1;
-        $transfer->timestarted = time();
-        $DB->update_record(self::TABLE, $transfer);
     }
 
     /**

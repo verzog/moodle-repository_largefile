@@ -68,6 +68,10 @@ class provider implements
             'userid' => 'privacy:metadata:repository_largefile_transfers:userid',
             'type' => 'privacy:metadata:repository_largefile_transfers:type',
             'filename' => 'privacy:metadata:repository_largefile_transfers:filename',
+            'payload' => 'privacy:metadata:repository_largefile_transfers:payload',
+            'status' => 'privacy:metadata:repository_largefile_transfers:status',
+            'result' => 'privacy:metadata:repository_largefile_transfers:result',
+            'error' => 'privacy:metadata:repository_largefile_transfers:error',
             'timecreated' => 'privacy:metadata:repository_largefile_transfers:timecreated',
         ], 'privacy:metadata:repository_largefile_transfers');
         // A staged payload's bytes are streamed into an export through the file
@@ -212,7 +216,10 @@ class provider implements
                     $transferdata[] = (object) [
                         'type' => $transfer->type,
                         'filename' => $transfer->filename,
+                        'payload' => $transfer->payload,
                         'status' => $transfer->status,
+                        'result' => $transfer->result,
+                        'error' => $transfer->error,
                         'timecreated' => userdate((int) $transfer->timecreated),
                     ];
                 }

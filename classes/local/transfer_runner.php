@@ -46,7 +46,10 @@ class transfer_runner {
      * @return void
      */
     public static function run(\stdClass $transfer): void {
-        transfer_manager::mark_running((int) $transfer->id);
+        if (!transfer_manager::claim((int) $transfer->id)) {
+            // Cancelled or already taken since the batch was read — skip it.
+            return;
+        }
         try {
             \core_php_time_limit::raise();
             raise_memory_limit(MEMORY_EXTRA);
@@ -120,6 +123,16 @@ class transfer_runner {
             'userid' => (int) $transfer->userid,
         ], $result['path']);
         @unlink($result['path']);
+
+        // Emit the same domain event as the synchronous import path (import.php),
+        // so audit integrations see every imported backup regardless of how it was
+        // started.
+        $peer = peer_manager::get($peerid);
+        \repository_largefile\event\backup_imported::build(
+            (int) $transfer->userid,
+            $peer ? $peer->name : '',
+            $filename
+        )->trigger();
         return $filename;
     }
 }

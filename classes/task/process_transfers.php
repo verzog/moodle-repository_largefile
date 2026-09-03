@@ -38,6 +38,9 @@ class process_transfers extends \core\task\scheduled_task {
     /** @var int Most transfers to run in a single pass, so one run cannot dominate cron. */
     private const BATCH = 10;
 
+    /** @var int Seconds a transfer may stay running before it is treated as interrupted. */
+    private const LEASE = 6 * HOURSECS;
+
     /**
      * Task name shown in the admin task list.
      *
@@ -53,6 +56,9 @@ class process_transfers extends \core\task\scheduled_task {
      * @return void
      */
     public function execute(): void {
+        // Return any transfer left running by an interrupted earlier run to the
+        // queue before picking up new work.
+        transfer_manager::reclaim_stale(time() - self::LEASE);
         $due = transfer_manager::get_due(time(), self::BATCH);
         foreach ($due as $transfer) {
             transfer_runner::run($transfer);

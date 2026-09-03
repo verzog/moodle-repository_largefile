@@ -132,7 +132,7 @@ if ($transfers) {
         get_string('actions'),
     ];
     foreach ($transfers as $transfer) {
-        $when = (int) $transfer->scheduledtime === 0
+        $when = (int) $transfer->scheduledtime <= (int) $transfer->timecreated
             ? get_string('transferwhennow', 'repository_largefile')
             : userdate((int) $transfer->scheduledtime);
         if ($transfer->status === transfer_manager::STATUS_COMPLETED) {

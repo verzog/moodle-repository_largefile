@@ -75,7 +75,7 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->assertNotContains($later, $ids);
 
         // A running transfer is not due even if its time passed.
-        transfer_manager::mark_running($soon);
+        transfer_manager::claim($soon);
         $due = transfer_manager::get_due($now);
         $this->assertArrayNotHasKey($soon, $due);
     }
@@ -89,7 +89,7 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->resetAfterTest(true);
         $id = transfer_manager::create(transfer_manager::TYPE_SHARE, 5, ['peerid' => 1, 'shareurl' => 'https://p/s?token=x']);
 
-        transfer_manager::mark_running($id);
+        transfer_manager::claim($id);
         $transfer = transfer_manager::get($id);
         $this->assertSame(transfer_manager::STATUS_RUNNING, $transfer->status);
         $this->assertEquals(1, $transfer->attempts);
@@ -102,7 +102,7 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->assertNotEmpty($transfer->timecompleted);
 
         $failid = transfer_manager::create(transfer_manager::TYPE_URL, 5, ['url' => 'https://e/x']);
-        transfer_manager::mark_running($failid);
+        transfer_manager::claim($failid);
         transfer_manager::mark_failed($failid, 'boom');
         $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($failid)->status);
         $this->assertSame('boom', transfer_manager::get($failid)->error);
@@ -120,7 +120,7 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->assertSame(transfer_manager::STATUS_CANCELLED, transfer_manager::get($id)->status);
 
         $running = transfer_manager::create(transfer_manager::TYPE_URL, 7, ['url' => 'https://e/z']);
-        transfer_manager::mark_running($running);
+        transfer_manager::claim($running);
         $this->assertFalse(transfer_manager::cancel($running));
         $this->assertSame(transfer_manager::STATUS_RUNNING, transfer_manager::get($running)->status);
     }
@@ -180,5 +180,67 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->assertCount(2, $all);
         $first = reset($all);
         $this->assertSame('Ada Lovelace', $first->username);
+    }
+
+    /**
+     * A transfer can be claimed once; a second claim, or a claim of a row
+     * cancelled since the batch was read, fails and does not resurrect it.
+     *
+     * @return void
+     */
+    public function test_claim_is_exclusive(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+        $this->assertTrue(transfer_manager::claim($id));
+        $this->assertFalse(transfer_manager::claim($id));
+
+        $other = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/2']);
+        transfer_manager::cancel($other);
+        $this->assertFalse(transfer_manager::claim($other));
+        $this->assertSame(transfer_manager::STATUS_CANCELLED, transfer_manager::get($other)->status);
+    }
+
+    /**
+     * reclaim_stale reschedules a running transfer whose lease expired, fails one
+     * that has exhausted its attempts, and leaves a within-lease one alone.
+     *
+     * @return void
+     */
+    public function test_reclaim_stale(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $retry = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/retry']);
+        transfer_manager::claim($retry);
+        $DB->set_field(transfer_manager::TABLE, 'timestarted', time() - 10000, ['id' => $retry]);
+        transfer_manager::reclaim_stale(time() - 5000);
+        $this->assertSame(transfer_manager::STATUS_SCHEDULED, transfer_manager::get($retry)->status);
+
+        $dead = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/dead']);
+        $DB->set_field(transfer_manager::TABLE, 'attempts', transfer_manager::MAX_ATTEMPTS, ['id' => $dead]);
+        $DB->set_field(transfer_manager::TABLE, 'status', transfer_manager::STATUS_RUNNING, ['id' => $dead]);
+        $DB->set_field(transfer_manager::TABLE, 'timestarted', time() - 10000, ['id' => $dead]);
+        transfer_manager::reclaim_stale(time() - 5000);
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($dead)->status);
+
+        $fresh = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/fresh']);
+        transfer_manager::claim($fresh);
+        transfer_manager::reclaim_stale(time() - 5000);
+        $this->assertSame(transfer_manager::STATUS_RUNNING, transfer_manager::get($fresh)->status);
+    }
+
+    /**
+     * An immediate transfer's due time is now (not epoch 0), so it queues fairly
+     * against explicitly scheduled transfers.
+     *
+     * @return void
+     */
+    public function test_immediate_uses_now_as_due_time(): void {
+        $this->resetAfterTest(true);
+        $before = time();
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1'], 0);
+        $transfer = transfer_manager::get($id);
+        $this->assertGreaterThanOrEqual($before, (int) $transfer->scheduledtime);
+        $this->assertLessThanOrEqual(time(), (int) $transfer->scheduledtime);
     }
 }
