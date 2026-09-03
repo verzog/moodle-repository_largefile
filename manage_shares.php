@@ -27,6 +27,7 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_manager;
+use repository_largefile\local\manage_page;
 use repository_largefile\form\share_form;
 use repository_largefile\event\share_created;
 
@@ -40,11 +41,7 @@ require_capability('repository/largefile:share', $context);
 $action = optional_param('action', '', PARAM_ALPHA);
 $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/manage_shares.php');
-$PAGE->set_context($context);
-$PAGE->set_url($baseurl);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('manageshares', 'repository_largefile'));
-$PAGE->set_heading(get_string('manageshares', 'repository_largefile'));
+manage_page::setup($baseurl, get_string('manageshares', 'repository_largefile'));
 
 if ($action === 'revoke' && $id) {
     require_sesskey();
@@ -80,6 +77,7 @@ if ($peers) {
 }
 
 echo $OUTPUT->header();
+echo manage_page::tabs('shares');
 echo $OUTPUT->heading(get_string('manageshares', 'repository_largefile'));
 echo html_writer::tag('p', get_string('manageshares_desc', 'repository_largefile'), ['class' => 'text-muted']);
 

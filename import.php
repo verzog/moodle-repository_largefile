@@ -27,6 +27,8 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_client;
+use repository_largefile\local\manage_page;
+use repository_largefile\local\transfer_manager;
 use repository_largefile\event\backup_imported;
 
 // Repository plugins are not part of the admin settings tree, so this page stands
@@ -37,11 +39,7 @@ $context = context_system::instance();
 require_capability('repository/largefile:import', $context);
 
 $baseurl = new moodle_url('/repository/largefile/import.php');
-$PAGE->set_context($context);
-$PAGE->set_url($baseurl);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('importshared', 'repository_largefile'));
-$PAGE->set_heading(get_string('importshared', 'repository_largefile'));
+manage_page::setup($baseurl, get_string('importshared', 'repository_largefile'));
 
 $peers = peer_manager::menu();
 $error = null;
@@ -50,6 +48,21 @@ $imported = null;
 if ($peers) {
     $form = new \repository_largefile\form\import_form($baseurl->out(false), ['peers' => $peers]);
     if ($data = $form->get_data()) {
+        if (!empty($data->background)) {
+            // Run the import on the server, immune to the web request timeout that
+            // a large backup would otherwise hit. It is picked up by the scheduled
+            // task and lands in the user's private files, like the direct import.
+            transfer_manager::create(
+                transfer_manager::TYPE_SHARE,
+                (int) $USER->id,
+                ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl],
+                0
+            );
+            redirect(
+                new moodle_url('/repository/largefile/transfers.php'),
+                get_string('importqueued', 'repository_largefile')
+            );
+        }
         \core_php_time_limit::raise();
         raise_memory_limit(MEMORY_EXTRA);
         try {
@@ -79,6 +92,7 @@ if ($peers) {
 }
 
 echo $OUTPUT->header();
+echo manage_page::tabs('import');
 echo $OUTPUT->heading(get_string('importshared', 'repository_largefile'));
 echo html_writer::tag('p', get_string('importshared_desc', 'repository_largefile'), ['class' => 'text-muted']);
 

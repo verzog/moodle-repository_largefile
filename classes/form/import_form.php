@@ -57,6 +57,12 @@ class import_form extends \moodleform {
         $mform->addRule('shareurl', get_string('required'), 'required', null, 'client');
         $mform->addHelpButton('shareurl', 'importurl', 'repository_largefile');
 
+        // Importing a large backup in the foreground can exceed the web server's
+        // request timeout (a 504). Running it on the server avoids that.
+        $mform->addElement('advcheckbox', 'background', get_string('importbackground', 'repository_largefile'));
+        $mform->setDefault('background', 1);
+        $mform->addHelpButton('background', 'importbackground', 'repository_largefile');
+
         $this->add_action_buttons(false, get_string('importbutton', 'repository_largefile'));
     }
 }

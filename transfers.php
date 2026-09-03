@@ -26,6 +26,7 @@ require(__DIR__ . '/../../config.php');
 
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\transfer_manager;
+use repository_largefile\local\manage_page;
 use repository_largefile\form\transfer_form;
 
 // Repository plugins are not part of the admin settings tree, so this page stands
@@ -38,11 +39,7 @@ require_capability('repository/largefile:import', $context);
 $action = optional_param('action', '', PARAM_ALPHA);
 $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/transfers.php');
-$PAGE->set_context($context);
-$PAGE->set_url($baseurl);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('transfers', 'repository_largefile'));
-$PAGE->set_heading(get_string('transfers', 'repository_largefile'));
+manage_page::setup($baseurl, get_string('transfers', 'repository_largefile'));
 
 if ($action === 'cancel' && $id) {
     require_sesskey();
@@ -79,6 +76,7 @@ if ($data = $form->get_data()) {
 }
 
 echo $OUTPUT->header();
+echo manage_page::tabs('transfers');
 echo $OUTPUT->heading(get_string('transfers', 'repository_largefile'));
 echo html_writer::tag('p', get_string('transfers_desc', 'repository_largefile'), ['class' => 'text-muted']);
 

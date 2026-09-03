@@ -2,6 +2,19 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.2 — 2026-09-03
+
+- **Management pages now share navigation.** Trusted peers, Backup shares, Import
+  and Transfers previously stood alone with no way back to the plugin's settings.
+  They now carry a common tab bar (with a **Settings** tab back to the
+  configuration page) and a breadcrumb, so you can move between them and back to
+  settings.
+- **Import a large shared backup in the background.** A foreground import of a
+  large backup could exceed the web server's request timeout (a 504). The import
+  form now offers "Import in the background" (on by default), which queues the
+  import as a server-side transfer that is immune to the request timeout and lands
+  in your private files when done — watchable on the Transfers page.
+
 ## 0.3.1 — 2026-09-03
 
 Bug fix: the upload dialogue failed to load with JavaScript caching turned off
