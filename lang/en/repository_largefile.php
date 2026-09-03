@@ -47,8 +47,9 @@ $string['errorsharedecrypt'] = 'The shared backup could not be decrypted. The pa
     . 'was corrupted or tampered with in transit.';
 $string['errorshareencrypt'] = 'The file could not be encrypted for sharing.';
 $string['errorshareexpired'] = 'This share has expired or reached its download limit.';
-$string['errorsharefetch'] = 'The shared backup could not be fetched from the peer. Check the link and that the peer '
-    . 'site is reachable.';
+$string['errorsharefetch'] = 'The shared backup could not be fetched from the peer. Check that the share link has not '
+    . 'expired, that the peer site is reachable, and that the peer\'s Site URL is set correctly here (a share on a '
+    . 'private or internal address is only reachable once the peer\'s Site URL is registered).';
 $string['errorsharehostmismatch'] = 'The share link\'s host does not match this peer\'s registered site URL. Import the '
     . 'link from the peer it belongs to, or correct the peer\'s site URL.';
 $string['errorshareintegrity'] = 'The decrypted backup did not match its expected checksum, so it was discarded.';
@@ -106,6 +107,7 @@ $string['peerurl_help'] = 'The peer site\'s address, for example https://peer.ex
     . 'allowed past this site\'s outgoing request block when importing that peer\'s share, so a peer on a private or '
     . 'internal network can be reached without weakening protection for any other host. A share link is only accepted if '
     . 'its host matches this URL.';
+$string['pendingpublications'] = 'Backups being published';
 $string['pluginname'] = 'Large file (URL or chunked upload)';
 $string['pluginname_help'] = 'Bring in a file that is too big for a normal upload: fetch it from a URL server-side, '
     . 'or upload it from your computer in small chunks that are not limited by this server\'s PHP upload size.';
@@ -154,12 +156,20 @@ $string['shareexpiry_help'] = 'How long the share can be downloaded before it st
     . 'unticked for a share that never expires.';
 $string['sharefile'] = 'File to share';
 $string['sharefilecol'] = 'File';
+$string['sharelinkcol'] = 'Share link';
 $string['sharelinkinfo'] = 'Give this link to the receiving site\'s administrator. They also need this site set up as a '
     . 'trusted peer there, using the same shared secret.';
 $string['sharemaxdownloads'] = 'Maximum downloads';
 $string['sharemaxdownloads_help'] = 'How many times the share may be downloaded before it stops working. Use 0 for no '
     . 'limit. A one-time share (1) is the safest default.';
 $string['sharepeer'] = 'Share with peer';
+$string['sharepublishbackground'] = 'Create in the background';
+$string['sharepublishbackground_help'] = 'Recommended for large backups. The backup is encrypted on the server rather '
+    . 'than in your browser, so creating the share is not cut off by a web server request timeout (a 504 error). Its '
+    . 'share link appears on the Transfers page when it is ready.';
+$string['sharequeued'] = 'The share is being created in the background. It will appear under "Backups being published" '
+    . 'below, and its link in the shares list, when it is ready.';
+$string['sharesheading'] = 'Published shares';
 $string['sharingmanagement'] = 'Backup sharing';
 $string['tabupload'] = 'Upload a large file';
 $string['taburl'] = 'From a URL';
@@ -184,6 +194,7 @@ $string['transferstatus_failed'] = 'Failed';
 $string['transferstatus_running'] = 'Running';
 $string['transferstatus_scheduled'] = 'Scheduled';
 $string['transfertype'] = 'Type';
+$string['transfertypepublish'] = 'Backup share (publish)';
 $string['transfertypeshare'] = 'Peer share import';
 $string['transfertypeurl'] = 'URL import';
 $string['transferurl'] = 'File URL';

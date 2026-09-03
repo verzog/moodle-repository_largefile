@@ -48,6 +48,17 @@ class transfer_manager {
     /** @var string A fetch-and-decrypt of a backup shared by a peer. */
     public const TYPE_SHARE = 'shareimport';
 
+    /** @var string A server-side encrypt-and-publish of a backup to a peer. */
+    public const TYPE_PUBLISH = 'sharepublish';
+
+    /**
+     * @var string Filearea (at the system context, keyed by transfer id) holding a
+     * queued publication's plaintext source until the runner encrypts it. It is
+     * plugin-owned rather than a draft file, so Moodle's draft cleanup cannot remove
+     * it out from under a job that is still waiting for cron.
+     */
+    public const PENDING_FILEAREA = 'pendingpublish';
+
     /** @var string Queued, waiting for its scheduled time (or the next run). */
     public const STATUS_SCHEDULED = 'scheduled';
 
@@ -276,6 +287,21 @@ class transfer_manager {
     public static function delete(int $id): void {
         global $DB;
         $DB->delete_records(self::TABLE, ['id' => $id]);
+    }
+
+    /**
+     * Delete a queued publication's staged plaintext source, if it has one.
+     *
+     * @param int $transferid The publish transfer's id (the staged file's item id).
+     * @return void
+     */
+    public static function delete_publish_source(int $transferid): void {
+        get_file_storage()->delete_area_files(
+            \context_system::instance()->id,
+            'repository_largefile',
+            self::PENDING_FILEAREA,
+            $transferid
+        );
     }
 
     /**

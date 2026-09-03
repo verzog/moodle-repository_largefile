@@ -2,6 +2,31 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.4 — 2026-09-03
+
+- **Publish a large backup share in the background.** Creating a share encrypted
+  the whole backup inside the web request, so a large file (e.g. several GB) could
+  exceed the web server's request timeout (a 504) before the share was ready. The
+  Backup shares form now offers **Create in the background** (on by default): the
+  uploaded backup is encrypted on the server as a queued transfer, immune to the
+  request timeout, and its share link appears on the **Transfers** page when ready.
+  The upload is referenced into a plugin-owned staging area (no second copy of a
+  large backup is made, and it survives Moodle's draft cleanup while it waits) and
+  removed once it has been encrypted — or on cancellation, with the cleanup task
+  sweeping any source left by a failed publish. A new *Backup share (publish)*
+  transfer type; runs under the same `process_transfers` scheduled task, so it needs
+  cron.
+  A **Backups being published** section on the page tracks each queued job (and
+  lets you cancel one), the shares list now shows each share's **link** so it can
+  be retrieved at any time, and the expiry is measured from when the share is
+  actually created (not from when it was queued). Publications stay within the
+  sharing capability — an import-only operator on the Transfers monitor does not
+  see or act on them.
+- **Clearer "could not be fetched" message on import.** When a share import fails
+  to reach the peer, the message now also points at the peer's **Site URL** — a
+  share on a private or internal address is only reachable once that URL is
+  registered (see 0.3.3) — alongside checking the link's expiry and reachability.
+
 ## 0.3.3 — 2026-09-03
 
 - **Import a share from a peer on a private/internal network.** Importing a share

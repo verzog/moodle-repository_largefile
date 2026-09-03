@@ -82,6 +82,12 @@ class share_form extends \moodleform {
         $mform->setDefault('maxdownloads', 1);
         $mform->addHelpButton('maxdownloads', 'sharemaxdownloads', 'repository_largefile');
 
+        // Encrypting a large backup in the foreground can exceed the web server's
+        // request timeout (a 504). Running it on the server avoids that.
+        $mform->addElement('advcheckbox', 'background', get_string('sharepublishbackground', 'repository_largefile'));
+        $mform->setDefault('background', 1);
+        $mform->addHelpButton('background', 'sharepublishbackground', 'repository_largefile');
+
         $this->add_action_buttons(true, get_string('createshare', 'repository_largefile'));
     }
 }
