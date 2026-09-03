@@ -52,7 +52,9 @@ class cleanup_chunks extends \core\task\scheduled_task {
      * @return void
      */
     public function execute() {
-        $config = get_config('repository_largefile');
+        // The retention durations are stored as repository type options (under the
+        // bare type name), the same place type_config_form() saves them.
+        $config = get_config('largefile');
         $state0duration = $config->state0duration ?? 3600;
         $state1duration = $config->state1duration ?? 3600;
         $state2duration = $config->state2duration ?? 86400;

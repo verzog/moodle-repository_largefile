@@ -2,6 +2,21 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.2.1 — 2026-09-03
+
+Bug fix and admin-UI tidy-up.
+
+- **Fix: settings and management pages were unreachable.** Repository plugins do
+  not load `settings.php` the way admin-tool plugins do, so the chunk-size and
+  retention settings never registered (the uploader silently used its 20 MB
+  fallback) and the trusted-peers / backup-shares / import pages had no admin-tree
+  entry. The tunables now live on the plugin's own configuration page via
+  `type_config_form()` (read with `get_config('largefile', …)`), and the three
+  management pages are linked from there — so everything sits one level under the
+  plugin's configuration page instead of as loose or missing nodes.
+- **Upload dialogue now shows a live percentage** next to the progress bar, so
+  it's clear an upload is actually progressing.
+
 ## 0.2.0 — 2026-09-03
 
 Adds **encrypted backup sharing** between two sites that both run this plugin.

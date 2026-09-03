@@ -292,11 +292,15 @@ const openUploadModal = async(data) => {
         }
     };
     const setProgress = (loaded, total) => {
+        const pct = total > 0 ? Math.round(loaded * 100 / total) : 0;
         const bar = el('[data-region="progressbar"]');
         if (bar) {
-            const pct = total > 0 ? Math.round(loaded * 100 / total) : 0;
             bar.style.width = pct + '%';
             bar.setAttribute('aria-valuenow', pct);
+        }
+        const label = el('[data-region="progresspct"]');
+        if (label) {
+            label.textContent = pct + '%';
         }
     };
     const abort = () => {
