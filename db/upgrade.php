@@ -60,7 +60,7 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         // A peer now records its site URL; its host is the only one exempt from the
         // site's cURL block when importing that peer's share.
         $table = new xmldb_table('repository_largefile_peers');
-        $field = new xmldb_field('baseurl', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, '', 'name');
+        $field = new xmldb_field('baseurl', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'name');
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
         }
