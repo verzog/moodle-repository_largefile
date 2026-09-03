@@ -87,10 +87,13 @@ class url_fetcher {
      * @param int $maxbytes Maximum accepted size in bytes; 0 (or negative) falls back to a finite ceiling.
      * @param callable|null $iscancelled Optional predicate polled during the transfer; when it returns
      *        true the download is aborted (so a cancelled request stops streaming instead of running on).
+     * @param object|null $securityhelper Optional cURL security helper; when null the site's default
+     *        policy applies (a user-supplied URL stays untrusted), when given it scopes the block, e.g.
+     *        to exempt one trusted peer host ({@see peer_curl_security}).
      * @return array Keys: 'path' (absolute temp path), 'filename', 'contenttype'.
      * @throws \moodle_exception With a repository_largefile error string key.
      */
-    public function fetch(string $url, int $maxbytes, ?callable $iscancelled = null): array {
+    public function fetch(string $url, int $maxbytes, ?callable $iscancelled = null, ?object $securityhelper = null): array {
         global $CFG;
         require_once($CFG->libdir . '/filelib.php');
 
@@ -116,7 +119,7 @@ class url_fetcher {
             throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
         }
 
-        $curl = new \curl();
+        $curl = new \curl($securityhelper ? ['securityhelper' => $securityhelper] : []);
         $curl->setHeader('Accept: application/octet-stream, */*');
         $options = [
             'CURLOPT_FILE' => $fh,

@@ -56,5 +56,17 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090500, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090503) {
+        // A peer now records its site URL; its host is the only one exempt from the
+        // site's cURL block when importing that peer's share.
+        $table = new xmldb_table('repository_largefile_peers');
+        $field = new xmldb_field('baseurl', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, '', 'name');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090503, 'repository', 'largefile');
+    }
+
     return true;
 }

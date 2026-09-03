@@ -2,6 +2,19 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.3 — 2026-09-03
+
+- **Import a share from a peer on a private/internal network.** Importing a share
+  could fail with *"The URL is blocked"* when the peer's address resolved to a
+  private range — Moodle's outgoing-request (SSRF) protection blocking it, as it
+  does by default. A trusted peer now records its **Site URL**, and only that one
+  registered host is allowed past the block when importing that peer's share
+  (every other host, redirect targets included, stays blocked, so no other
+  internal service becomes reachable). A share link is now also accepted only when
+  its host matches the peer it is imported from. Existing peers keep working; edit
+  a peer to add its Site URL to reach one behind the block. New `baseurl` column on
+  the peers table (added by upgrade).
+
 ## 0.3.2 — 2026-09-03
 
 - **Management pages now share navigation.** Trusted peers, Backup shares, Import

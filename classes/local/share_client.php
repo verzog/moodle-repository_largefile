@@ -55,8 +55,9 @@ class share_client {
             throw new \moodle_exception('errorsharenopeer', 'repository_largefile');
         }
         [$base, $token] = self::split_url($shareurl);
+        $security = self::peer_security($peerid, $base);
 
-        $meta = self::fetch_meta($base, $token, $secret);
+        $meta = self::fetch_meta($base, $token, $secret, $security);
         if (!isset($meta['sha256'], $meta['salt'], $meta['filename'])) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
@@ -66,7 +67,7 @@ class share_client {
         );
         $fetcher = new url_fetcher();
         $sitemax = (int) ($GLOBALS['CFG']->maxbytes ?? 0);
-        $fetched = $fetcher->fetch($downloadurl, $sitemax);
+        $fetched = $fetcher->fetch($downloadurl, $sitemax, null, $security);
 
         $key = crypto::derive_key($secret, hex2bin($meta['salt']));
         $plainpath = make_request_directory() . '/' . clean_param($meta['filename'], PARAM_FILE);
@@ -77,6 +78,34 @@ class share_client {
         }
 
         return ['path' => $plainpath, 'filename' => clean_param($meta['filename'], PARAM_FILE)];
+    }
+
+    /**
+     * Build the cURL security helper for a peer fetch.
+     *
+     * The share endpoint must live on the peer's registered site host, so it is
+     * checked against that host first. When a peer has a registered site URL, the
+     * returned helper exempts only that one host from the site's cURL block (so a
+     * peer on a private-range address is reachable while every other host, redirect
+     * targets included, stays blocked). A legacy peer with no registered URL gets
+     * the site's default policy (null), so a public peer keeps working and a peer
+     * behind the block must be given its site URL to become reachable.
+     *
+     * @param int $peerid The peer the share came from.
+     * @param string $base The share endpoint base URL (scheme://host[:port]/path).
+     * @return \core\files\curl_security_helper_base|null The scoped helper, or null for the site default.
+     * @throws \moodle_exception If the share host does not match the peer's registered site host.
+     */
+    private static function peer_security(int $peerid, string $base): ?\core\files\curl_security_helper_base {
+        $peerhost = peer_manager::get_host($peerid);
+        if ($peerhost === null) {
+            return null;
+        }
+        $host = \core_text::strtolower((string) parse_url($base, PHP_URL_HOST));
+        if ($host === '' || $host !== $peerhost) {
+            throw new \moodle_exception('errorsharehostmismatch', 'repository_largefile');
+        }
+        return new peer_curl_security($peerhost);
     }
 
     /**
@@ -108,12 +137,13 @@ class share_client {
      * @param string $base The share endpoint base URL.
      * @param string $token The share token.
      * @param string $secret The pairing secret.
+     * @param object|null $security The cURL security helper to apply, or null for the site default.
      * @return array The decoded metadata.
      * @throws \moodle_exception On a transport error or non-JSON response.
      */
-    private static function fetch_meta(string $base, string $token, string $secret): array {
+    private static function fetch_meta(string $base, string $token, string $secret, ?object $security = null): array {
         $url = $base . '?' . http_build_query(signer::sign(['token' => $token, 'action' => 'meta'], $secret));
-        $curl = new \curl();
+        $curl = new \curl($security ? ['securityhelper' => $security] : []);
         $curl->setHeader('Accept: application/json');
         $body = $curl->get($url, [], [
             'CURLOPT_FOLLOWLOCATION' => 1,

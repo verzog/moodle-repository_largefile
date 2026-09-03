@@ -51,7 +51,7 @@ $form = new peer_form($baseurl->out(false), ['id' => $id]);
 if ($id && $action === 'edit') {
     $peer = peer_manager::get($id);
     if ($peer) {
-        $form->set_data(['id' => $peer->id, 'name' => $peer->name]);
+        $form->set_data(['id' => $peer->id, 'name' => $peer->name, 'baseurl' => $peer->baseurl]);
     }
 }
 
@@ -59,9 +59,9 @@ if ($form->is_cancelled()) {
     redirect($baseurl);
 } else if ($data = $form->get_data()) {
     if (!empty($data->id)) {
-        peer_manager::update((int) $data->id, $data->name, $data->secret ?: null);
+        peer_manager::update((int) $data->id, $data->name, $data->secret ?: null, $data->baseurl);
     } else {
-        peer_manager::create($data->name, $data->secret);
+        peer_manager::create($data->name, $data->secret, $data->baseurl);
     }
     redirect($baseurl, get_string('peersaved', 'repository_largefile'));
 }
@@ -76,6 +76,7 @@ if ($peers) {
     $table = new html_table();
     $table->head = [
         get_string('peername', 'repository_largefile'),
+        get_string('peerurl', 'repository_largefile'),
         get_string('actions'),
     ];
     foreach ($peers as $peer) {
@@ -88,7 +89,7 @@ if ($peers) {
             get_string('delete'),
             ['onclick' => "return confirm('" . get_string('deletepeerconfirm', 'repository_largefile') . "');"]
         );
-        $table->data[] = [format_string($peer->name), "$edit &nbsp; $delete"];
+        $table->data[] = [format_string($peer->name), s((string) $peer->baseurl), "$edit &nbsp; $delete"];
     }
     echo html_writer::table($table);
 } else {

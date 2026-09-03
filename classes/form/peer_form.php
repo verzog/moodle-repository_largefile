@@ -52,6 +52,11 @@ class peer_form extends \moodleform {
         $mform->setType('name', PARAM_TEXT);
         $mform->addRule('name', get_string('required'), 'required', null, 'client');
 
+        $mform->addElement('text', 'baseurl', get_string('peerurl', 'repository_largefile'), ['size' => 50]);
+        $mform->setType('baseurl', PARAM_URL);
+        $mform->addRule('baseurl', get_string('required'), 'required', null, 'client');
+        $mform->addHelpButton('baseurl', 'peerurl', 'repository_largefile');
+
         $mform->addElement(
             'textarea',
             'secret',
@@ -79,6 +84,12 @@ class peer_form extends \moodleform {
         // A short secret is trivially brute-forceable; require real entropy.
         if (!empty($data['secret']) && strlen(trim($data['secret'])) < 24) {
             $errors['secret'] = get_string('errorsecrettooshort', 'repository_largefile');
+        }
+        // The site URL fixes the one host exempt from the cURL block, so it must be
+        // a real http(s) URL with a host (PARAM_URL alone allows a bare path).
+        $baseurl = trim($data['baseurl'] ?? '');
+        if ($baseurl !== '' && !\repository_largefile\local\url_fetcher::is_fetchable_url($baseurl)) {
+            $errors['baseurl'] = get_string('errorpeerbadurl', 'repository_largefile');
         }
         return $errors;
     }

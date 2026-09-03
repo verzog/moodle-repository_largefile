@@ -44,13 +44,15 @@ class peer_manager {
      *
      * @param string $name The peer's display name (unique).
      * @param string $secret The pairing secret, in the clear.
+     * @param string $baseurl The peer's site URL.
      * @return int The new peer id.
      */
-    public static function create(string $name, string $secret): int {
+    public static function create(string $name, string $secret, string $baseurl = ''): int {
         global $DB;
         $now = time();
         return (int) $DB->insert_record(self::TABLE, (object) [
             'name' => $name,
+            'baseurl' => $baseurl,
             'sharedsecret' => \core\encryption::encrypt($secret),
             'timecreated' => $now,
             'timemodified' => $now,
@@ -58,20 +60,39 @@ class peer_manager {
     }
 
     /**
-     * Update a peer's name and, optionally, its secret.
+     * Update a peer's name, site URL and, optionally, its secret.
      *
      * @param int $id The peer id.
      * @param string $name The new display name.
      * @param string|null $secret A new secret, or null to keep the existing one.
+     * @param string|null $baseurl The new site URL, or null to keep the existing one.
      * @return void
      */
-    public static function update(int $id, string $name, ?string $secret = null): void {
+    public static function update(int $id, string $name, ?string $secret = null, ?string $baseurl = null): void {
         global $DB;
         $record = (object) ['id' => $id, 'name' => $name, 'timemodified' => time()];
         if ($secret !== null && $secret !== '') {
             $record->sharedsecret = \core\encryption::encrypt($secret);
         }
+        if ($baseurl !== null) {
+            $record->baseurl = $baseurl;
+        }
         $DB->update_record(self::TABLE, $record);
+    }
+
+    /**
+     * The host of a peer's registered site URL, if it has one.
+     *
+     * @param int $id The peer id.
+     * @return string|null The lower-cased host, or null if the peer has no site URL.
+     */
+    public static function get_host(int $id): ?string {
+        $peer = self::get($id);
+        if (!$peer || empty($peer->baseurl)) {
+            return null;
+        }
+        $host = (string) parse_url($peer->baseurl, PHP_URL_HOST);
+        return $host !== '' ? \core_text::strtolower($host) : null;
     }
 
     /**
