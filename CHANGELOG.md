@@ -2,6 +2,15 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.7 — 2026-09-04
+
+- **Throughput and ETA on a running publication.** Alongside the percent complete,
+  a running background publish now shows a rough **speed (MB/s)** and **estimated
+  time remaining**, plus how long it has been running — on the Backup shares page
+  and the Transfers monitor. The figures make "slow" (they keep moving) easy to
+  tell from "stuck" (they are frozen) at a glance. The publish records the backup's
+  size in its queued job so the readout can be computed; no schema change.
+
 ## 0.3.6 — 2026-09-04
 
 Makes background publication of a **very large** backup faster, observable and

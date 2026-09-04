@@ -49,6 +49,35 @@ class manage_page {
     }
 
     /**
+     * A one-line progress summary for a running transfer: percent, and — when the
+     * transfer records its size (a publish) — a rough throughput and estimated time
+     * remaining, plus how long it has been running. Throughput and ETA make "slow"
+     * (the figures keep moving) easy to tell from "stuck" (they do not).
+     *
+     * @param \stdClass $transfer A running transfer row.
+     * @return string The summary, e.g. "47% · 85.3 MB/s · about 35 mins left · running for 12 mins".
+     */
+    public static function running_progress(\stdClass $transfer): string {
+        $percent = (int) $transfer->progress;
+        $elapsed = $transfer->timestarted ? max(1, time() - (int) $transfer->timestarted) : 0;
+        $total = (int) (transfer_manager::payload($transfer)['filesize'] ?? 0);
+
+        $parts = [$percent . '%'];
+        if ($total > 0 && $percent > 0 && $elapsed > 0) {
+            $done = (int) ($total * $percent / 100);
+            $rate = (int) ($done / $elapsed);
+            if ($rate > 0) {
+                $parts[] = display_size($rate) . '/s';
+                $parts[] = get_string('transfereta', 'repository_largefile', format_time((int) (($total - $done) / $rate)));
+            }
+        }
+        if ($elapsed > 0) {
+            $parts[] = get_string('transferrunningfor', 'repository_largefile', format_time($elapsed));
+        }
+        return implode(' · ', $parts);
+    }
+
+    /**
      * Set a management page up with the admin layout, its title, and a breadcrumb
      * that leads back to the plugin's configuration page.
      *

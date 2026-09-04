@@ -176,6 +176,7 @@ $string['taburl'] = 'From a URL';
 $string['task:processtransfers'] = 'Run queued large-file transfers';
 $string['tokenexpired'] = 'The upload session has expired. Close and reopen the file picker to start again.';
 $string['transfercancelled'] = 'Transfer cancelled.';
+$string['transfereta'] = 'about {$a} left';
 $string['transfernew'] = 'Queue a new transfer';
 $string['transferoutcome'] = 'Outcome';
 $string['transferprogress'] = 'Progress';
