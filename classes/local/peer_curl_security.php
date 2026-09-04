@@ -113,14 +113,20 @@ class peer_curl_security extends \core\files\curl_security_helper {
      * target included — falls through to the site's normal block list, so no other
      * host or service becomes reachable.
      *
+     * The site check always runs first, even for the exempt origin: it records the
+     * state ({@see \core\files\curl_security_helper::$urlblockchecked} and the host,
+     * resolved IPs and port) that {@see \core\files\curl_security_helper::get_resolve_info()}
+     * reads back. Only its final verdict is overridden for the trusted origin.
+     *
      * @param string $urlstring The URL to check.
      * @param int $notused Unused legacy parameter kept for signature compatibility.
      * @return bool True if the URL is blocked.
      */
     public function url_is_blocked($urlstring, $notused = null) {
-        if ($this->allows((string) $urlstring)) {
+        $blocked = parent::url_is_blocked($urlstring);
+        if ($blocked && $this->allows((string) $urlstring)) {
             return false;
         }
-        return parent::url_is_blocked($urlstring);
+        return $blocked;
     }
 }

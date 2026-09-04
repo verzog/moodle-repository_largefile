@@ -2,6 +2,16 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.5 — 2026-09-04
+
+- **Fix: importing a share from a trusted peer threw a coding error.** The
+  peer-scoped cURL security helper short-circuited its allow decision for the
+  registered peer origin without running the site check, so Moodle's cURL wrapper
+  then raised *"url_is_blocked() must be called before get_resolve_info()"* and the
+  fetch failed. The helper now always runs the site check first (recording the
+  state the wrapper reads back) and only overrides the verdict for the trusted
+  origin.
+
 ## 0.3.4 — 2026-09-03
 
 - **Publish a large backup share in the background.** Creating a share encrypted

@@ -79,6 +79,21 @@ final class peer_curl_security_test extends \advanced_testcase {
     }
 
     /**
+     * After checking an exempt origin, the curl wrapper can read resolve info.
+     *
+     * The site check runs even for the exempt origin, so its "checked" flag is set
+     * and get_resolve_info() does not throw (regression: the exemption used to
+     * short-circuit the parent, which then raised a coding_exception).
+     *
+     * @return void
+     */
+    public function test_resolve_info_available_after_allowed_check(): void {
+        $helper = new peer_curl_security('https://peer.example.org');
+        $this->assertFalse($helper->url_is_blocked('https://peer.example.org/share.php'));
+        $this->assertIsArray($helper->get_resolve_info());
+    }
+
+    /**
      * Any other host still falls through to the site block (no open redirect out).
      *
      * @return void
