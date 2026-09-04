@@ -21,8 +21,8 @@
  * it does is on behalf of the transfer's own {@see transfer_manager} row. A URL
  * import is fetched (SSRF-aware) and staged into the owner's file picker; a share
  * import is fetched, decrypted and verified ({@see share_client}) and saved into
- * the owner's private files, ready to restore. All outcomes are recorded back on
- * the transfer row so the admin monitor and the owner can see what happened.
+ * the owner's private backup area, ready to restore. All outcomes are recorded back
+ * on the transfer row so the admin monitor and the owner can see what happened.
  *
  * @package    repository_largefile
  * @copyright  2026 SCCA
@@ -96,8 +96,13 @@ class transfer_runner {
     }
 
     /**
-     * Fetch, decrypt and verify a peer's shared backup and save it to the owner's
-     * private files.
+     * Fetch, decrypt and verify a peer's shared backup and save it into the owner's
+     * private backup area, ready to restore.
+     *
+     * The file is stored in the user context's `backup` file area (not generic
+     * private files), so it appears directly under "User private backup area" on
+     * every course's restore screen with a one-click restore link — which is where
+     * a course backup is actually usable.
      *
      * @param \stdClass $transfer The transfer row.
      * @param array $payload Decoded payload; expects 'peerid' and 'shareurl'.
@@ -112,13 +117,13 @@ class transfer_runner {
         $fs = get_file_storage();
         $usercontext = \context_user::instance((int) $transfer->userid);
         $filename = $result['filename'];
-        if ($fs->file_exists($usercontext->id, 'user', 'private', 0, '/', $filename)) {
+        if ($fs->file_exists($usercontext->id, 'user', 'backup', 0, '/', $filename)) {
             $filename = time() . '-' . $filename;
         }
         $fs->create_file_from_pathname([
             'contextid' => $usercontext->id,
             'component' => 'user',
-            'filearea' => 'private',
+            'filearea' => 'backup',
             'itemid' => 0,
             'filepath' => '/',
             'filename' => $filename,

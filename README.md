@@ -140,7 +140,9 @@ link straight away.
 paste the link. The plugin fetches the metadata and ciphertext through Moodle's
 SSRF-aware `\curl` wrapper, decrypts with the key re-derived from the pairing
 secret and the share's salt, and verifies the recovered plaintext against the
-advertised SHA-256 before saving it to your private files for restore.
+advertised SHA-256 before saving it to your **private backup area** — where it
+appears under *Restore > User private backup area* on any course, ready to restore
+in one click.
 
 **Request authentication.** Every request to the share endpoint is signed with
 HMAC-SHA256 over the canonicalised parameters and carries a timestamp (a ±5-minute
@@ -162,7 +164,8 @@ configuration page at *Site administration > Plugins > Repositories > Large
 file*). Queue one and close the browser: the `process_transfers` scheduled task
 picks it up (a scheduled transfer waits for its chosen time), fetches it, and — for
 a URL import — stages the file into your large-file picker, or — for a peer-share
-import — decrypts, verifies and saves it to your private files ready to restore.
+import — decrypts, verifies and saves it to your private backup area, ready to
+restore from any course under *Restore > User private backup area*.
 
 The **Transfers** page is also a **site-wide monitor**: it lists every chunked
 upload currently streaming in and every queued, running or finished transfer,

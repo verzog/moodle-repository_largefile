@@ -2,6 +2,18 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.8 — 2026-09-04
+
+- **Imported peer backups now land where you can actually restore them.** A
+  successful peer-share import was saved into your generic **Private files**, which
+  Moodle's course-restore screen does not read — so the transfer reported success
+  but the backup could not be restored without fishing it out through a file picker.
+  Imported backups now go to your **private backup area** (the user `backup` file
+  area) instead, so each appears directly under *Restore > User private backup area*
+  on any course, with a one-click **Restore** link. Applies to both the synchronous
+  and the background (unattended/scheduled) import paths. No schema change; existing
+  files already in Private files can be moved across via *Manage backup files*.
+
 ## 0.3.7 — 2026-09-04
 
 - **Throughput, ETA and stall detection on a running publication.** Alongside the
