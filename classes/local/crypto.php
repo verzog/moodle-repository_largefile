@@ -80,19 +80,42 @@ class crypto {
      * @param string $srcpath Absolute path of the plaintext file.
      * @param string $destpath Absolute path to write the ciphertext to.
      * @param string $key 32-byte content key (see {@see derive_key()}).
+     * @param callable|null $onprogress Optional callback invoked as ($bytesdone, $bytestotal) as the
+     *        plaintext is consumed, for progress reporting on a long encryption.
      * @return string Lowercase hex SHA-256 of the plaintext.
      * @throws \moodle_exception If the files cannot be opened.
      */
-    public static function encrypt_file(string $srcpath, string $destpath, string $key): string {
+    public static function encrypt_file(string $srcpath, string $destpath, string $key, ?callable $onprogress = null): string {
         $in = fopen($srcpath, 'rb');
+        if ($in === false) {
+            throw new \moodle_exception('errorshareencrypt', 'repository_largefile');
+        }
+        try {
+            $total = (int) (@filesize($srcpath) ?: 0);
+            return self::encrypt_stream($in, $total, $destpath, $key, $onprogress);
+        } finally {
+            fclose($in);
+        }
+    }
+
+    /**
+     * Encrypt an open plaintext stream to a path, returning the SHA-256 of the plaintext.
+     *
+     * Encrypting straight from a source stream (for example a stored file's content
+     * handle) avoids first copying a multi-gigabyte plaintext to a temporary file.
+     * The caller owns $in and must close it; this closes only the output.
+     *
+     * @param resource $in An open, readable plaintext stream.
+     * @param int $total Total plaintext length in bytes, or 0 if unknown (for progress).
+     * @param string $destpath Absolute path to write the ciphertext to.
+     * @param string $key 32-byte content key (see {@see derive_key()}).
+     * @param callable|null $onprogress Optional callback invoked as ($bytesdone, $bytestotal).
+     * @return string Lowercase hex SHA-256 of the plaintext.
+     * @throws \moodle_exception If the output cannot be opened.
+     */
+    public static function encrypt_stream($in, int $total, string $destpath, string $key, ?callable $onprogress = null): string {
         $out = fopen($destpath, 'wb');
-        if ($in === false || $out === false) {
-            if ($in !== false) {
-                fclose($in);
-            }
-            if ($out !== false) {
-                fclose($out);
-            }
+        if ($out === false) {
             throw new \moodle_exception('errorshareencrypt', 'repository_largefile');
         }
         try {
@@ -100,6 +123,7 @@ class crypto {
             fwrite($out, $header);
             $hash = hash_init('sha256');
             $final = SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL;
+            $done = 0;
 
             // Read-ahead by one chunk so the last chunk can be tagged FINAL, which
             // lets decryption detect a truncated ciphertext.
@@ -115,10 +139,13 @@ class crypto {
                     $islast ? $final : 0
                 );
                 fwrite($out, $cipher);
+                $done += strlen($chunk);
+                if ($onprogress !== null) {
+                    $onprogress($done, $total);
+                }
                 $chunk = $next;
             } while (!$islast);
         } finally {
-            fclose($in);
             fclose($out);
         }
         return hash_final($hash);

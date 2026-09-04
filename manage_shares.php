@@ -59,6 +59,15 @@ if ($action === 'cancelpublish' && $id) {
     }
     redirect($baseurl, get_string('transfercancelled', 'repository_largefile'));
 }
+if ($action === 'requeuepublish' && $id) {
+    require_sesskey();
+    // A publisher may requeue only their own stuck or failed publication.
+    $pending = transfer_manager::get($id);
+    if ($pending && $pending->type === transfer_manager::TYPE_PUBLISH && (int) $pending->userid === (int) $USER->id) {
+        transfer_manager::requeue($id);
+    }
+    redirect($baseurl, get_string('transferrequeued', 'repository_largefile'));
+}
 
 $peers = peer_manager::menu();
 $newshare = null;
@@ -160,20 +169,37 @@ if ($pending) {
         get_string('actions'),
     ];
     foreach ($pending as $job) {
-        $outcome = $job->status === transfer_manager::STATUS_FAILED
-            ? html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger'])
-            : '—';
-        $cancel = $job->status === transfer_manager::STATUS_SCHEDULED
-            ? html_writer::link(
+        if ($job->status === transfer_manager::STATUS_RUNNING) {
+            // Show percent complete and how long it has been running, so a slow (or
+            // stuck) encryption is legible instead of an opaque "running".
+            $elapsed = $job->timestarted
+                ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $job->timestarted))
+                : '';
+            $outcome = trim(((int) $job->progress) . '%' . ' ' . $elapsed);
+        } else if ($job->status === transfer_manager::STATUS_FAILED) {
+            $outcome = html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger']);
+        } else {
+            $outcome = '—';
+        }
+        $actions = [];
+        if ($job->status === transfer_manager::STATUS_SCHEDULED) {
+            $actions[] = html_writer::link(
                 new moodle_url($baseurl, ['action' => 'cancelpublish', 'id' => $job->id, 'sesskey' => sesskey()]),
                 get_string('cancel')
-            )
-            : '';
+            );
+        }
+        if (in_array($job->status, [transfer_manager::STATUS_RUNNING, transfer_manager::STATUS_FAILED], true)) {
+            // Recover a stuck or failed publication without waiting for the lease.
+            $actions[] = html_writer::link(
+                new moodle_url($baseurl, ['action' => 'requeuepublish', 'id' => $job->id, 'sesskey' => sesskey()]),
+                get_string('transferrequeue', 'repository_largefile')
+            );
+        }
         $ptable->data[] = [
             format_string((string) $job->filename),
             get_string('transferstatus_' . $job->status, 'repository_largefile'),
             $outcome,
-            $cancel,
+            implode(' &nbsp; ', $actions),
         ];
     }
     echo html_writer::table($ptable);

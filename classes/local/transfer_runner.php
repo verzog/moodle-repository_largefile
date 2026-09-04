@@ -174,20 +174,25 @@ class transfer_runner {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
 
-        $temp = make_request_directory() . '/' . $file->get_filename();
-        $file->copy_content_to($temp);
-        try {
-            $share = share_manager::create(
-                $peerid,
-                $temp,
-                $file->get_filename(),
-                $expires,
-                $maxdownloads,
-                (int) $transfer->userid
-            );
-        } finally {
-            @unlink($temp);
-        }
+        // Encrypt straight from the staged stored file (no plaintext temp copy) and
+        // report progress on the transfer row, throttled to at most once a second so
+        // a long encryption stays observable without hammering the database.
+        $lastupdate = 0;
+        $onprogress = function (int $done, int $total) use ($transfer, &$lastupdate): void {
+            $now = time();
+            if ($total > 0 && $now !== $lastupdate) {
+                $lastupdate = $now;
+                transfer_manager::set_progress((int) $transfer->id, (int) floor($done * 100 / $total));
+            }
+        };
+        $share = share_manager::create_from_storedfile(
+            $peerid,
+            $file,
+            $expires,
+            $maxdownloads,
+            (int) $transfer->userid,
+            $onprogress
+        );
         \repository_largefile\event\share_created::for_share($share)->trigger();
 
         // The plaintext source is no longer needed once it is encrypted and stored.

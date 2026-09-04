@@ -44,7 +44,7 @@ class share_manager {
     private const FILEAREA = 'share';
 
     /**
-     * Publish a file as an encrypted share for a peer.
+     * Publish a file (by path) as an encrypted share for a peer.
      *
      * @param int $peerid The target peer.
      * @param string $srcpath Absolute path of the plaintext file to share.
@@ -63,6 +63,84 @@ class share_manager {
         int $maxdownloads,
         int $userid
     ): \stdClass {
+        return self::store_encrypted(
+            $peerid,
+            $filename,
+            (int) (@filesize($srcpath) ?: 0),
+            $expires,
+            $maxdownloads,
+            $userid,
+            fn(string $dest, string $key) => crypto::encrypt_file($srcpath, $dest, $key)
+        );
+    }
+
+    /**
+     * Publish a stored file as an encrypted share, streaming straight from it.
+     *
+     * Encrypting directly from the stored file's content handle avoids first copying
+     * a multi-gigabyte plaintext to a temporary file — one fewer full pass over the
+     * data — which matters for the background publish of a large backup.
+     *
+     * @param int $peerid The target peer.
+     * @param \stored_file $file The plaintext stored file to share.
+     * @param int $expires Unix expiry time, or 0 for never.
+     * @param int $maxdownloads Maximum successful downloads, or 0 for unlimited.
+     * @param int $userid The user creating the share.
+     * @param callable|null $onprogress Optional callback invoked as ($bytesdone, $bytestotal).
+     * @return \stdClass The stored share row (including its token).
+     * @throws \moodle_exception If the peer is unknown.
+     */
+    public static function create_from_storedfile(
+        int $peerid,
+        \stored_file $file,
+        int $expires,
+        int $maxdownloads,
+        int $userid,
+        ?callable $onprogress = null
+    ): \stdClass {
+        return self::store_encrypted(
+            $peerid,
+            $file->get_filename(),
+            (int) $file->get_filesize(),
+            $expires,
+            $maxdownloads,
+            $userid,
+            function (string $dest, string $key) use ($file, $onprogress) {
+                $in = $file->get_content_file_handle();
+                try {
+                    return crypto::encrypt_stream($in, (int) $file->get_filesize(), $dest, $key, $onprogress);
+                } finally {
+                    if (is_resource($in)) {
+                        fclose($in);
+                    }
+                }
+            }
+        );
+    }
+
+    /**
+     * Encrypt a plaintext (via the given encryptor), store the ciphertext and record
+     * the share.
+     *
+     * @param int $peerid The target peer.
+     * @param string $filename The original file name.
+     * @param int $filesize The plaintext size in bytes.
+     * @param int $expires Unix expiry time, or 0 for never.
+     * @param int $maxdownloads Maximum successful downloads, or 0 for unlimited.
+     * @param int $userid The user creating the share.
+     * @param callable $encryptto Encryptor called as ($destpath, $key) returning the plaintext SHA-256.
+     * @return \stdClass The stored share row (including its token).
+     * @throws \moodle_exception If the peer is unknown.
+     */
+    private static function store_encrypted(
+        int $peerid,
+        string $filename,
+        int $filesize,
+        int $expires,
+        int $maxdownloads,
+        int $userid,
+        callable $encryptto
+    ): \stdClass {
         global $DB;
 
         $secret = peer_manager::get_secret($peerid);
@@ -73,13 +151,13 @@ class share_manager {
         $saltraw = random_bytes(crypto::salt_bytes());
         $key = crypto::derive_key($secret, $saltraw);
         $encrypted = make_request_directory() . '/share.enc';
-        $sha256 = crypto::encrypt_file($srcpath, $encrypted, $key);
+        $sha256 = $encryptto($encrypted, $key);
 
         $record = (object) [
             'token' => bin2hex(random_bytes(20)),
             'peerid' => $peerid,
             'filename' => $filename,
-            'filesize' => (int) filesize($srcpath),
+            'filesize' => $filesize,
             'sha256' => $sha256,
             'salt' => bin2hex($saltraw),
             'expires' => $expires,

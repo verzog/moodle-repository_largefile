@@ -38,8 +38,15 @@ class process_transfers extends \core\task\scheduled_task {
     /** @var int Most transfers to run in a single pass, so one run cannot dominate cron. */
     private const BATCH = 10;
 
-    /** @var int Seconds a transfer may stay running before it is treated as interrupted. */
-    private const LEASE = 6 * HOURSECS;
+    /**
+     * @var int Seconds a transfer may stay running before it is treated as interrupted.
+     * A scheduled task holds its lock for the whole run, so a live worker (however
+     * slow) is never reclaimed mid-encryption — only a run whose worker actually died
+     * releases the lock and lets a later run reclaim the row, so a modest lease
+     * recovers a dead job within about an hour rather than leaving it stuck for most
+     * of a day.
+     */
+    private const LEASE = 1 * HOURSECS;
 
     /**
      * Task name shown in the admin task list.

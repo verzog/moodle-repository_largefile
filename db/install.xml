@@ -89,6 +89,7 @@
         <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="scheduled" SEQUENCE="false" COMMENT="scheduled, running, completed, failed or cancelled."/>
         <FIELD NAME="scheduledtime" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Earliest time the transfer may run; 0 means as soon as possible."/>
         <FIELD NAME="attempts" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Number of run attempts so far."/>
+        <FIELD NAME="progress" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Percent complete (0-100) of a running transfer, for display."/>
         <FIELD NAME="error" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Last failure message, if any."/>
         <FIELD NAME="result" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Where the finished transfer landed, for display."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>

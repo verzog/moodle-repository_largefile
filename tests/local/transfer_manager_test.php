@@ -139,10 +139,12 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->resetAfterTest(true);
 
         $old = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/old']);
+        transfer_manager::claim($old);
         transfer_manager::mark_completed($old, 'x');
         $DB->set_field(transfer_manager::TABLE, 'timecompleted', time() - 1000, ['id' => $old]);
 
         $recent = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/recent']);
+        transfer_manager::claim($recent);
         transfer_manager::mark_completed($recent, 'y');
 
         $pending = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/pending']);
@@ -246,5 +248,61 @@ final class transfer_manager_test extends \advanced_testcase {
         $transfer = transfer_manager::get($id);
         $this->assertGreaterThanOrEqual($before, (int) $transfer->scheduledtime);
         $this->assertLessThanOrEqual(time(), (int) $transfer->scheduledtime);
+    }
+
+    /**
+     * Requeue returns a running (or failed) transfer to the scheduled queue, and
+     * does nothing to one that is not running or failed.
+     *
+     * @return void
+     */
+    public function test_requeue_returns_running_to_scheduled(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+        transfer_manager::claim($id);
+        transfer_manager::set_progress($id, 40);
+
+        $this->assertTrue(transfer_manager::requeue($id));
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_SCHEDULED, $transfer->status);
+        $this->assertSame(0, (int) $transfer->progress);
+        $this->assertNull($transfer->timestarted);
+        // A scheduled transfer has nothing to recover, so requeue is a no-op.
+        $this->assertFalse(transfer_manager::requeue($id));
+    }
+
+    /**
+     * Progress is only recorded while a transfer is running, and is clamped to 0-100.
+     *
+     * @return void
+     */
+    public function test_set_progress_only_while_running(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+
+        transfer_manager::set_progress($id, 50);
+        $this->assertSame(0, (int) transfer_manager::get($id)->progress);
+
+        transfer_manager::claim($id);
+        transfer_manager::set_progress($id, 150);
+        $this->assertSame(100, (int) transfer_manager::get($id)->progress);
+    }
+
+    /**
+     * A result from a worker whose transfer was meanwhile requeued is discarded,
+     * so the stale run cannot resurrect the row.
+     *
+     * @return void
+     */
+    public function test_mark_completed_ignored_after_requeue(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+        transfer_manager::claim($id);
+        transfer_manager::requeue($id);
+
+        transfer_manager::mark_completed($id, 'late');
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_SCHEDULED, $transfer->status);
+        $this->assertNull($transfer->result);
     }
 }

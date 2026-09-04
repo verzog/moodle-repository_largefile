@@ -54,6 +54,39 @@ final class crypto_test extends \advanced_testcase {
     }
 
     /**
+     * Encrypting straight from a stream round-trips and reports progress.
+     *
+     * @return void
+     */
+    public function test_encrypt_stream_round_trip_and_progress(): void {
+        $dir = make_request_directory();
+        $plain = $dir . '/plain.bin';
+        $cipher = $dir . '/cipher.bin';
+        $out = $dir . '/out.bin';
+        $data = random_bytes(2621440);
+        file_put_contents($plain, $data);
+
+        $key = crypto::derive_key(crypto::generate_secret(), random_bytes(crypto::salt_bytes()));
+
+        $seen = [];
+        $in = fopen($plain, 'rb');
+        try {
+            $enchash = crypto::encrypt_stream($in, strlen($data), $cipher, $key, function ($done, $total) use (&$seen) {
+                $seen[] = [$done, $total];
+            });
+        } finally {
+            fclose($in);
+        }
+
+        $this->assertSame(hash('sha256', $data), $enchash);
+        $this->assertSame($enchash, crypto::decrypt_file($cipher, $out, $key));
+        $this->assertStringEqualsFile($out, $data);
+        // Progress was reported and ended at the full size.
+        $this->assertNotEmpty($seen);
+        $this->assertSame([strlen($data), strlen($data)], end($seen));
+    }
+
+    /**
      * A file smaller than one chunk round-trips too.
      *
      * @return void

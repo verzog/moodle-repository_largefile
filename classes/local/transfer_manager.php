@@ -192,8 +192,51 @@ class transfer_manager {
             'status' => self::STATUS_RUNNING,
             'timestarted' => time(),
             'attempts' => (int) $transfer->attempts + 1,
+            'progress' => 0,
         ]);
         $transaction->allow_commit();
+        return true;
+    }
+
+    /**
+     * Record a running transfer's percent complete (clamped to 0-100).
+     *
+     * Only a still-running row is touched, so a progress write from a worker whose
+     * transfer was meanwhile cancelled or requeued is harmlessly ignored.
+     *
+     * @param int $id The transfer id.
+     * @param int $percent Percent complete.
+     * @return void
+     */
+    public static function set_progress(int $id, int $percent): void {
+        global $DB;
+        $percent = max(0, min(100, $percent));
+        $DB->set_field(self::TABLE, 'progress', $percent, ['id' => $id, 'status' => self::STATUS_RUNNING]);
+    }
+
+    /**
+     * Return a running or failed transfer to the queue to be run again.
+     *
+     * Used to recover a publication whose worker died mid-run (leaving it stuck on
+     * "running") or to retry one that failed, without waiting for the stale lease.
+     *
+     * @param int $id The transfer id.
+     * @return bool True if it was requeued.
+     */
+    public static function requeue(int $id): bool {
+        global $DB;
+        $transfer = self::get($id);
+        if (!$transfer || !in_array($transfer->status, [self::STATUS_RUNNING, self::STATUS_FAILED], true)) {
+            return false;
+        }
+        $DB->update_record(self::TABLE, (object) [
+            'id' => $id,
+            'status' => self::STATUS_SCHEDULED,
+            'scheduledtime' => time(),
+            'timestarted' => null,
+            'progress' => 0,
+            'error' => null,
+        ]);
         return true;
     }
 
@@ -231,12 +274,11 @@ class transfer_manager {
      * @return void
      */
     public static function mark_completed(int $id, string $result): void {
-        global $DB;
-        $DB->update_record(self::TABLE, (object) [
-            'id' => $id,
+        self::finish($id, [
             'status' => self::STATUS_COMPLETED,
             'result' => $result,
             'error' => null,
+            'progress' => 100,
             'timecompleted' => time(),
         ]);
     }
@@ -249,13 +291,33 @@ class transfer_manager {
      * @return void
      */
     public static function mark_failed(int $id, string $error): void {
-        global $DB;
-        $DB->update_record(self::TABLE, (object) [
-            'id' => $id,
+        self::finish($id, [
             'status' => self::STATUS_FAILED,
             'error' => $error,
             'timecompleted' => time(),
         ]);
+    }
+
+    /**
+     * Apply a terminal transition to a transfer, but only while it is still running.
+     *
+     * Guarding on the running state (under a row lock) means a result recorded by a
+     * worker whose transfer was meanwhile cancelled or requeued is discarded rather
+     * than resurrecting the row.
+     *
+     * @param int $id The transfer id.
+     * @param array $fields Column => value updates to apply (an 'id' is added).
+     * @return void
+     */
+    private static function finish(int $id, array $fields): void {
+        global $DB;
+        $transaction = $DB->start_delegated_transaction();
+        $sql = "SELECT id, status FROM {" . self::TABLE . "} WHERE id = :id FOR UPDATE";
+        $row = $DB->get_record_sql($sql, ['id' => $id], IGNORE_MISSING);
+        if ($row && $row->status === self::STATUS_RUNNING) {
+            $DB->update_record(self::TABLE, (object) (['id' => $id] + $fields));
+        }
+        $transaction->allow_commit();
     }
 
     /**

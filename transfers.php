@@ -65,6 +65,13 @@ if ($action === 'remove' && $id) {
     }
     redirect($baseurl, get_string('transferremoved', 'repository_largefile'));
 }
+if ($action === 'requeue' && $id) {
+    require_sesskey();
+    if ($mayacton($id)) {
+        transfer_manager::requeue($id);
+    }
+    redirect($baseurl, get_string('transferrequeued', 'repository_largefile'));
+}
 
 $peers = peer_manager::menu();
 $form = new transfer_form($baseurl->out(false), ['peers' => $peers]);
@@ -156,21 +163,34 @@ if ($transfers) {
             $outcome = s((string) $transfer->result);
         } else if ($transfer->status === transfer_manager::STATUS_FAILED) {
             $outcome = html_writer::tag('span', s((string) $transfer->error), ['class' => 'text-danger']);
+        } else if ($transfer->status === transfer_manager::STATUS_RUNNING) {
+            $elapsed = $transfer->timestarted
+                ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted))
+                : '';
+            $outcome = trim(((int) $transfer->progress) . '%' . ' ' . $elapsed);
         } else {
             $outcome = '—';
         }
-        $actions = '';
+        $actions = [];
         if ($transfer->status === transfer_manager::STATUS_SCHEDULED) {
-            $actions = html_writer::link(
+            $actions[] = html_writer::link(
                 new moodle_url($baseurl, ['action' => 'cancel', 'id' => $transfer->id, 'sesskey' => sesskey()]),
                 get_string('cancel')
             );
         } else if ($transfer->status !== transfer_manager::STATUS_RUNNING) {
-            $actions = html_writer::link(
+            $actions[] = html_writer::link(
                 new moodle_url($baseurl, ['action' => 'remove', 'id' => $transfer->id, 'sesskey' => sesskey()]),
                 get_string('delete')
             );
         }
+        // A running or failed transfer can be requeued to recover a stuck run.
+        if (in_array($transfer->status, [transfer_manager::STATUS_RUNNING, transfer_manager::STATUS_FAILED], true)) {
+            $actions[] = html_writer::link(
+                new moodle_url($baseurl, ['action' => 'requeue', 'id' => $transfer->id, 'sesskey' => sesskey()]),
+                get_string('transferrequeue', 'repository_largefile')
+            );
+        }
+        $actions = implode(' &nbsp; ', $actions);
         $table->data[] = [
             $typenames[$transfer->type] ?? s($transfer->type),
             format_string((string) $transfer->username),

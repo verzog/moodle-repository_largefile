@@ -182,6 +182,9 @@ $string['transferprogress'] = 'Progress';
 $string['transferqueue'] = 'Queued transfers';
 $string['transferqueued'] = 'Transfer queued.';
 $string['transferremoved'] = 'Transfer removed.';
+$string['transferrequeue'] = 'Requeue';
+$string['transferrequeued'] = 'The transfer has been queued to run again.';
+$string['transferrunningfor'] = 'running for {$a}';
 $string['transfers'] = 'Transfers';
 $string['transfers_desc'] = 'Queue a server-side file transfer to run unattended — now or at a quiet time — and watch every '
     . 'transfer and chunked upload happening across the site.';
