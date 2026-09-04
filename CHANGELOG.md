@@ -16,13 +16,10 @@ self-healing.
   third of the disk I/O for a multi-gigabyte publish.
 - **Faster recovery of a stuck job.** If the cron worker dies mid-encryption (for
   example a host that caps cron run time), the job was left "Running" for up to six
-  hours; the stale-lease is now one hour. A scheduled task holds its lock for the
-  whole run, so a genuinely slow-but-alive encryption is never reclaimed early.
-- **Requeue / cancel a stuck publication.** You can requeue a publication that is
-  stuck "Running" or has failed (from the Backup shares page or the Transfers
-  monitor) to run it again immediately, without waiting for the lease. A result
-  recorded by a worker whose job was meanwhile requeued or cancelled is discarded,
-  so the state cannot be resurrected.
+  hours before the scheduled task returned it to the queue; the stale-lease is now
+  one hour. A scheduled task holds its lock for the whole run, so a genuinely
+  slow-but-alive encryption is never reclaimed early, and only a job whose worker
+  actually died is retried.
 
 ## 0.3.5 — 2026-09-04
 

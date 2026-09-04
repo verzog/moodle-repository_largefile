@@ -251,27 +251,6 @@ final class transfer_manager_test extends \advanced_testcase {
     }
 
     /**
-     * Requeue returns a running (or failed) transfer to the scheduled queue, and
-     * does nothing to one that is not running or failed.
-     *
-     * @return void
-     */
-    public function test_requeue_returns_running_to_scheduled(): void {
-        $this->resetAfterTest(true);
-        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
-        transfer_manager::claim($id);
-        transfer_manager::set_progress($id, 40);
-
-        $this->assertTrue(transfer_manager::requeue($id));
-        $transfer = transfer_manager::get($id);
-        $this->assertSame(transfer_manager::STATUS_SCHEDULED, $transfer->status);
-        $this->assertSame(0, (int) $transfer->progress);
-        $this->assertNull($transfer->timestarted);
-        // A scheduled transfer has nothing to recover, so requeue is a no-op.
-        $this->assertFalse(transfer_manager::requeue($id));
-    }
-
-    /**
      * Progress is only recorded while a transfer is running, and is clamped to 0-100.
      *
      * @return void
@@ -289,17 +268,15 @@ final class transfer_manager_test extends \advanced_testcase {
     }
 
     /**
-     * A result from a worker whose transfer was meanwhile requeued is discarded,
-     * so the stale run cannot resurrect the row.
+     * mark_completed / mark_failed only transition a row that is still running, so a
+     * result from a reclaimed run cannot resurrect a row already moved on.
      *
      * @return void
      */
-    public function test_mark_completed_ignored_after_requeue(): void {
+    public function test_mark_ignored_when_not_running(): void {
         $this->resetAfterTest(true);
+        // A scheduled (not yet claimed) transfer is left untouched by mark_completed.
         $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
-        transfer_manager::claim($id);
-        transfer_manager::requeue($id);
-
         transfer_manager::mark_completed($id, 'late');
         $transfer = transfer_manager::get($id);
         $this->assertSame(transfer_manager::STATUS_SCHEDULED, $transfer->status);
