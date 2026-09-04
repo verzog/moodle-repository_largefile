@@ -2,6 +2,25 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.3.6 — 2026-09-04
+
+Makes background publication of a **very large** backup faster, observable and
+self-healing.
+
+- **Progress and elapsed time.** A running publication now shows a percent-complete
+  and how long it has been running (on the Backup shares page and the Transfers
+  monitor), instead of an opaque "Running" — so a slow or stuck encryption is
+  legible. New `progress` column on the transfers table (added by upgrade).
+- **One fewer pass over the data.** The backup is now encrypted **straight from the
+  stored file** rather than first copied to a temporary plaintext, cutting roughly a
+  third of the disk I/O for a multi-gigabyte publish.
+- **Faster recovery of a stuck job.** If the cron worker dies mid-encryption (for
+  example a host that caps cron run time), the job was left "Running" for up to six
+  hours before the scheduled task returned it to the queue; the stale-lease is now
+  one hour. A scheduled task holds its lock for the whole run, so a genuinely
+  slow-but-alive encryption is never reclaimed early, and only a job whose worker
+  actually died is retried.
+
 ## 0.3.5 — 2026-09-04
 
 - **Fix: importing a share from a trusted peer threw a coding error.** The

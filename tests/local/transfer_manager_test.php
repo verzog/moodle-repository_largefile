@@ -139,10 +139,12 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->resetAfterTest(true);
 
         $old = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/old']);
+        transfer_manager::claim($old);
         transfer_manager::mark_completed($old, 'x');
         $DB->set_field(transfer_manager::TABLE, 'timecompleted', time() - 1000, ['id' => $old]);
 
         $recent = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/recent']);
+        transfer_manager::claim($recent);
         transfer_manager::mark_completed($recent, 'y');
 
         $pending = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/pending']);
@@ -246,5 +248,38 @@ final class transfer_manager_test extends \advanced_testcase {
         $transfer = transfer_manager::get($id);
         $this->assertGreaterThanOrEqual($before, (int) $transfer->scheduledtime);
         $this->assertLessThanOrEqual(time(), (int) $transfer->scheduledtime);
+    }
+
+    /**
+     * Progress is only recorded while a transfer is running, and is clamped to 0-100.
+     *
+     * @return void
+     */
+    public function test_set_progress_only_while_running(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+
+        transfer_manager::set_progress($id, 50);
+        $this->assertSame(0, (int) transfer_manager::get($id)->progress);
+
+        transfer_manager::claim($id);
+        transfer_manager::set_progress($id, 150);
+        $this->assertSame(100, (int) transfer_manager::get($id)->progress);
+    }
+
+    /**
+     * mark_completed / mark_failed only transition a row that is still running, so a
+     * result from a reclaimed run cannot resurrect a row already moved on.
+     *
+     * @return void
+     */
+    public function test_mark_ignored_when_not_running(): void {
+        $this->resetAfterTest(true);
+        // A scheduled (not yet claimed) transfer is left untouched by mark_completed.
+        $id = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/1']);
+        transfer_manager::mark_completed($id, 'late');
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_SCHEDULED, $transfer->status);
+        $this->assertNull($transfer->result);
     }
 }

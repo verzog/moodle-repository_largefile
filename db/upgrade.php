@@ -68,5 +68,16 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090503, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090506) {
+        // A running transfer now records its percent complete, for display.
+        $table = new xmldb_table('repository_largefile_transfers');
+        $field = new xmldb_field('progress', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '0', 'attempts');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090506, 'repository', 'largefile');
+    }
+
     return true;
 }

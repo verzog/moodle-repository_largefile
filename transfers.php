@@ -156,6 +156,14 @@ if ($transfers) {
             $outcome = s((string) $transfer->result);
         } else if ($transfer->status === transfer_manager::STATUS_FAILED) {
             $outcome = html_writer::tag('span', s((string) $transfer->error), ['class' => 'text-danger']);
+        } else if ($transfer->status === transfer_manager::STATUS_RUNNING) {
+            // Only the publish runner reports a percentage; for the import types show
+            // elapsed time alone rather than a misleading 0%.
+            $elapsed = $transfer->timestarted
+                ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted))
+                : '';
+            $percent = $transfer->type === transfer_manager::TYPE_PUBLISH ? ((int) $transfer->progress) . '% ' : '';
+            $outcome = trim($percent . $elapsed) ?: '—';
         } else {
             $outcome = '—';
         }

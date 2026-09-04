@@ -174,6 +174,7 @@ final class transfer_runner_test extends \advanced_testcase {
             'orphan.mbz'
         );
         $this->stage_publish_source($id, 'orphan.mbz');
+        transfer_manager::claim($id);
         transfer_manager::mark_failed($id, 'boom');
 
         (new \repository_largefile\task\cleanup_chunks())->execute();

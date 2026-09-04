@@ -160,9 +160,18 @@ if ($pending) {
         get_string('actions'),
     ];
     foreach ($pending as $job) {
-        $outcome = $job->status === transfer_manager::STATUS_FAILED
-            ? html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger'])
-            : '—';
+        if ($job->status === transfer_manager::STATUS_RUNNING) {
+            // Show percent complete and how long it has been running, so a slow (or
+            // stuck) encryption is legible instead of an opaque "running".
+            $elapsed = $job->timestarted
+                ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $job->timestarted))
+                : '';
+            $outcome = trim(((int) $job->progress) . '%' . ' ' . $elapsed);
+        } else if ($job->status === transfer_manager::STATUS_FAILED) {
+            $outcome = html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger']);
+        } else {
+            $outcome = '—';
+        }
         $cancel = $job->status === transfer_manager::STATUS_SCHEDULED
             ? html_writer::link(
                 new moodle_url($baseurl, ['action' => 'cancelpublish', 'id' => $job->id, 'sesskey' => sesskey()]),
