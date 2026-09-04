@@ -71,14 +71,15 @@ $string['expiresnever'] = 'Never';
 $string['importbackground'] = 'Import in the background';
 $string['importbackground_help'] = 'Recommended for large backups. The import runs on the server rather than in your '
     . 'browser, so it is not cut off by a web server request timeout (a 504 error). It is queued on the Transfers page and '
-    . 'saved to your private files when it finishes.';
+    . 'saved to your private backup area when it finishes, ready to restore.';
 $string['importbutton'] = 'Fetch and import';
 $string['importpeer'] = 'From peer';
 $string['importqueued'] = 'The import has been queued and will run in the background. Follow its progress on the Transfers page.';
 $string['importshared'] = 'Import a shared backup';
 $string['importshared_desc'] = 'Fetch a backup a trusted peer has shared with this site. It is downloaded over an '
-    . 'authenticated, encrypted channel, its checksum is verified, and it is placed in your private files ready to restore.';
-$string['importsuccess'] = 'The shared backup "{$a}" was fetched, verified and saved to your private files, ready to restore.';
+    . 'authenticated, encrypted channel, its checksum is verified, and it is placed in your private backup area ready to restore.';
+$string['importsuccess'] = 'The shared backup "{$a}" was fetched, verified and saved to your private backup area. Restore it from '
+    . 'any course under "Restore" → "User private backup area".';
 $string['importurl'] = 'Share link';
 $string['importurl_help'] = 'Paste the share link the sending site gave you. It identifies a single share; your request '
     . 'is signed with this peer\'s shared secret so the link alone cannot fetch the file.';
