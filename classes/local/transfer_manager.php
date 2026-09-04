@@ -193,6 +193,7 @@ class transfer_manager {
             'timestarted' => time(),
             'attempts' => (int) $transfer->attempts + 1,
             'progress' => 0,
+            'progressupdated' => time(),
         ]);
         $transaction->allow_commit();
         return true;
@@ -201,8 +202,11 @@ class transfer_manager {
     /**
      * Record a running transfer's percent complete (clamped to 0-100).
      *
-     * Only a still-running row is touched, so a progress write from a worker whose
-     * transfer was meanwhile cancelled or reclaimed is harmlessly ignored.
+     * progressupdated is advanced only when the percent actually changes, so it
+     * marks the last real forward progress — a stalled run (percent no longer
+     * moving) can be told apart from a slow one that is still creeping up. Only a
+     * still-running row is touched, so a write from a worker whose transfer was
+     * meanwhile cancelled or reclaimed is harmlessly ignored.
      *
      * @param int $id The transfer id.
      * @param int $percent Percent complete.
@@ -211,7 +215,18 @@ class transfer_manager {
     public static function set_progress(int $id, int $percent): void {
         global $DB;
         $percent = max(0, min(100, $percent));
-        $DB->set_field(self::TABLE, 'progress', $percent, ['id' => $id, 'status' => self::STATUS_RUNNING]);
+        $DB->execute(
+            "UPDATE {" . self::TABLE . "}
+                SET progress = :percent, progressupdated = :now
+              WHERE id = :id AND status = :running AND progress <> :current",
+            [
+                'percent' => $percent,
+                'now' => time(),
+                'id' => $id,
+                'running' => self::STATUS_RUNNING,
+                'current' => $percent,
+            ]
+        );
     }
 
     /**

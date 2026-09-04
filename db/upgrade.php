@@ -79,5 +79,17 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090506, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090508) {
+        // Track when a running transfer's percent last advanced, so a stalled run is
+        // distinguishable from a merely slow one.
+        $table = new xmldb_table('repository_largefile_transfers');
+        $field = new xmldb_field('progressupdated', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'progress');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090508, 'repository', 'largefile');
+    }
+
     return true;
 }

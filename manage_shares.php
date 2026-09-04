@@ -84,6 +84,8 @@ if ($peers) {
                     // starts the expiry when the share is actually created.
                     'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
                     'maxdownloads' => max(0, (int) $data->maxdownloads),
+                    // Recorded so the running-progress readout can show throughput/ETA.
+                    'filesize' => (int) $file->get_filesize(),
                 ],
                 0,
                 $context->id,
@@ -161,12 +163,9 @@ if ($pending) {
     ];
     foreach ($pending as $job) {
         if ($job->status === transfer_manager::STATUS_RUNNING) {
-            // Show percent complete and how long it has been running, so a slow (or
-            // stuck) encryption is legible instead of an opaque "running".
-            $elapsed = $job->timestarted
-                ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $job->timestarted))
-                : '';
-            $outcome = trim(((int) $job->progress) . '%' . ' ' . $elapsed);
+            // Show percent, throughput and ETA, so a slow (figures moving) encryption
+            // is easy to tell from a stuck (figures frozen) one — no opaque "running".
+            $outcome = manage_page::running_progress($job);
         } else if ($job->status === transfer_manager::STATUS_FAILED) {
             $outcome = html_writer::tag('span', s((string) $job->error), ['class' => 'text-danger']);
         } else {
