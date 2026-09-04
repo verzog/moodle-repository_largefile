@@ -4,12 +4,16 @@ All notable changes to `repository_largefile` are documented here.
 
 ## 0.3.7 — 2026-09-04
 
-- **Throughput and ETA on a running publication.** Alongside the percent complete,
-  a running background publish now shows a rough **speed (MB/s)** and **estimated
-  time remaining**, plus how long it has been running — on the Backup shares page
-  and the Transfers monitor. The figures make "slow" (they keep moving) easy to
-  tell from "stuck" (they are frozen) at a glance. The publish records the backup's
-  size in its queued job so the readout can be computed; no schema change.
+- **Throughput, ETA and stall detection on a running publication.** Alongside the
+  percent complete, a running background publish now shows a rough **average speed
+  (MB/s)** and **estimated time remaining**, plus how long it has been running — on
+  the Backup shares page and the Transfers monitor. The publish records the backup's
+  size in its queued job so the readout can be computed. To tell "slow" from "stuck"
+  reliably (an average speed alone keeps ticking down even on a frozen job), a
+  running transfer now records **when its percent last advanced**; if it has not
+  moved for well over its own average step time the readout says *no progress for …*
+  instead of a speed and ETA. New nullable `progressupdated` column on the transfers
+  table (added by upgrade).
 
 ## 0.3.6 — 2026-09-04
 

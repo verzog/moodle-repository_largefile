@@ -182,6 +182,7 @@ $string['transferoutcome'] = 'Outcome';
 $string['transferprogress'] = 'Progress';
 $string['transferqueue'] = 'Queued transfers';
 $string['transferqueued'] = 'Transfer queued.';
+$string['transferrate'] = 'avg {$a}/s';
 $string['transferremoved'] = 'Transfer removed.';
 $string['transferrunningfor'] = 'running for {$a}';
 $string['transfers'] = 'Transfers';
@@ -189,6 +190,7 @@ $string['transfers_desc'] = 'Queue a server-side file transfer to run unattended
     . 'transfer and chunked upload happening across the site.';
 $string['transferscheduledpast'] = 'Choose a time in the future.';
 $string['transferscheduledtime'] = 'Run at';
+$string['transferstalled'] = 'no progress for {$a}';
 $string['transferstatus'] = 'Status';
 $string['transferstatus_cancelled'] = 'Cancelled';
 $string['transferstatus_completed'] = 'Completed';

@@ -55,6 +55,37 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * A run whose percent has not advanced for far longer than its own average step
+     * is flagged as stalled — no speed or ETA, so "stuck" reads differently from
+     * "slow" at a glance.
+     *
+     * @return void
+     */
+    public function test_running_progress_flags_a_stall(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            1,
+            ['peerid' => 1, 'filesize' => 100 * 1024 * 1024],
+            0,
+            \context_system::instance()->id,
+            'backup.mbz'
+        );
+        transfer_manager::claim($id);
+        // Started 10 minutes ago, reached 50%, but has not advanced for 5 minutes.
+        $DB->set_field(transfer_manager::TABLE, 'timestarted', time() - 600, ['id' => $id]);
+        transfer_manager::set_progress($id, 50);
+        $DB->set_field(transfer_manager::TABLE, 'progressupdated', time() - 300, ['id' => $id]);
+
+        $summary = manage_page::running_progress(transfer_manager::get($id));
+
+        $this->assertStringContainsString('50%', $summary);
+        $this->assertStringContainsString('no progress for', $summary);
+        $this->assertStringNotContainsString('/s', $summary);
+    }
+
+    /**
      * Without a recorded size (or before any progress) only the percent shows, so
      * the readout never divides by zero or invents a rate.
      *

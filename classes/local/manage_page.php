@@ -49,25 +49,39 @@ class manage_page {
     }
 
     /**
-     * A one-line progress summary for a running transfer: percent, and — when the
-     * transfer records its size (a publish) — a rough throughput and estimated time
-     * remaining, plus how long it has been running. Throughput and ETA make "slow"
-     * (the figures keep moving) easy to tell from "stuck" (they do not).
+     * A one-line progress summary for a running transfer.
+     *
+     * Shows the percent and how long it has been running; when the transfer records
+     * its size (a publish) it adds a rough average throughput and an estimated time
+     * remaining. If the percent has not advanced for far longer than its own average
+     * step, it is flagged as stalled instead — so a merely slow run (percent still
+     * creeping up) is distinguishable from a stuck one at a glance.
      *
      * @param \stdClass $transfer A running transfer row.
-     * @return string The summary, e.g. "47% · 85.3 MB/s · about 35 mins left · running for 12 mins".
+     * @return string The summary, e.g. "47% · avg 85.3 MB/s · about 35 mins left · running for 12 mins".
      */
     public static function running_progress(\stdClass $transfer): string {
+        $now = time();
         $percent = (int) $transfer->progress;
-        $elapsed = $transfer->timestarted ? max(1, time() - (int) $transfer->timestarted) : 0;
+        $started = (int) $transfer->timestarted;
+        $elapsed = $started ? max(1, $now - $started) : 0;
+        $lastadvance = (int) ($transfer->progressupdated ?: $transfer->timestarted);
         $total = (int) (transfer_manager::payload($transfer)['filesize'] ?? 0);
 
         $parts = [$percent . '%'];
-        if ($total > 0 && $percent > 0 && $elapsed > 0) {
+        // Stalled: still mid-run, but no forward step for well over its own average
+        // step time (and at least two minutes), which no longer looks like progress.
+        $stepaverage = $percent > 0 ? $elapsed / $percent : 0;
+        $sincestep = $lastadvance ? $now - $lastadvance : 0;
+        $stalled = $percent > 0 && $percent < 100 && $sincestep > max(120, (int) (3 * $stepaverage));
+
+        if ($stalled) {
+            $parts[] = get_string('transferstalled', 'repository_largefile', format_time($sincestep));
+        } else if ($total > 0 && $percent > 0 && $elapsed > 0) {
             $done = (int) ($total * $percent / 100);
             $rate = (int) ($done / $elapsed);
             if ($rate > 0) {
-                $parts[] = display_size($rate) . '/s';
+                $parts[] = get_string('transferrate', 'repository_largefile', display_size($rate));
                 $parts[] = get_string('transfereta', 'repository_largefile', format_time((int) (($total - $done) / $rate)));
             }
         }
