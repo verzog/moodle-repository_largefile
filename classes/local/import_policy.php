@@ -174,6 +174,37 @@ class import_policy {
     }
 
     /**
+     * Whether the large-file picker is an enabled destination. When it is not, the
+     * plugin stages nothing into the picker at all — neither an import nor a direct
+     * browser/URL upload through the picker's own upload dialogue.
+     *
+     * @return bool True when the picker destination is enabled.
+     */
+    public static function picker_enabled(): bool {
+        return in_array(self::DEST_PICKER, self::enabled_destinations(), true);
+    }
+
+    /**
+     * Why a direct upload into the picker (a browser chunk upload or the dialogue's
+     * URL fetch) should be refused, or null when it is allowed. Centralises the two
+     * gates the picker's own upload paths must apply: the picker must be an enabled
+     * destination, and the file's kind must be accepted.
+     *
+     * @param string $filename The uploaded/fetched file name.
+     * @return string|null A ready-to-show error message, or null when allowed.
+     */
+    public static function upload_rejection_reason(string $filename): ?string {
+        if (!self::picker_enabled()) {
+            return get_string('errorpickerdisabled', 'repository_largefile');
+        }
+        $kind = self::detect_type($filename);
+        if (!self::is_type_accepted($kind)) {
+            return get_string('errortypenotaccepted', 'repository_largefile', self::type_label($kind));
+        }
+        return null;
+    }
+
+    /**
      * The destinations offered for a given kind: those that suit the kind and are
      * enabled site-wide, in preference order.
      *
@@ -231,7 +262,10 @@ class import_policy {
                 $types[] = '.' . $ext;
             }
         }
-        return $types ?: ['.mbz'];
+        // Restriction on with nothing ticked means the plugin accepts nothing; a
+        // sentinel that matches no real file keeps it from being advertised (and, in
+        // particular, from claiming backups) rather than falling back to '.mbz'.
+        return $types ?: ['.repository_largefile_none'];
     }
 
     /**

@@ -67,10 +67,13 @@ class transfer_form extends \moodleform {
         }
 
         // Where the fetched file should be stored, when the site offers a choice.
-        // The choices are narrowed to the file's kind once it is fetched.
+        // "Automatic" (the default, empty value) routes to the file's kind default
+        // once fetched; the explicit choices are narrowed to that kind.
         $destinations = \repository_largefile\local\import_policy::destination_menu();
         if (count($destinations) > 1) {
-            $mform->addElement('select', 'destination', get_string('importdestination', 'repository_largefile'), $destinations);
+            $choices = ['' => get_string('destinationauto', 'repository_largefile')] + $destinations;
+            $mform->addElement('select', 'destination', get_string('importdestination', 'repository_largefile'), $choices);
+            $mform->setDefault('destination', '');
             $mform->addHelpButton('destination', 'importdestination', 'repository_largefile');
         }
 

@@ -34,6 +34,7 @@ $string['deletepeerconfirm'] = 'Delete this peer? Existing shares to it will sto
 $string['destination_backuparea'] = 'Private backup area (restore)';
 $string['destination_picker'] = 'Large file picker (general use)';
 $string['destination_privatefiles'] = 'Private files';
+$string['destinationauto'] = 'Automatic (based on file type)';
 $string['editpeer'] = 'Edit peer';
 $string['errorbadurl'] = 'That does not look like a valid http(s) download URL.';
 $string['errorchunktoolarge'] = 'The server rejected an upload chunk as too large. Ask an administrator to lower the '
@@ -45,6 +46,7 @@ $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that UR
 $string['errordownloadtoobig'] = 'The file at that URL is larger than the site upload limit.';
 $string['erroremptyfile'] = 'The selected file is empty.';
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
+$string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
 $string['errorsharedecrypt'] = 'The shared backup could not be decrypted. The pairing secret may be wrong, or the file '

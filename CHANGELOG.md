@@ -15,8 +15,11 @@ All notable changes to `repository_largefile` are documented here.
   which destinations are offered. Type restriction is **opt-in**: with it off (the
   default) every file type is accepted, as before. When on, the accepted-type gate
   applies to every ingest path — the import page, the URL-import queue, and the
-  chunked large-file uploader (rejected before any bytes are written). No schema
-  change; the routing travels in the transfer's existing payload.
+  chunked large-file uploader (both its browser-chunk and URL-fetch paths, rejected
+  before any bytes are kept). The destination chooser defaults to **Automatic**
+  (route by file kind), and disabling the picker destination also turns off direct
+  uploads into the picker. No schema change; the routing travels in the transfer's
+  existing payload.
   <br>_A follow-up will add a specific course's backup area as a further
   destination (with a course picker and capability checks)._
 

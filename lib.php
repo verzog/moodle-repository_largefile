@@ -104,18 +104,25 @@ class repository_largefile extends repository {
             ];
         }
 
-        return [
+        // Only advertise the upload button when the picker is an enabled destination;
+        // when it is off, the plugin stages nothing into the picker (the upload
+        // dialogue's chunk and URL-fetch paths refuse it too).
+        $canupload = \repository_largefile\local\import_policy::picker_enabled();
+        $listing = [
             'list' => $list,
             'dynload' => false,
             'nologin' => true,
             'nosearch' => true,
             'norefresh' => false,
-            'uploadfile' => true,
-            'uploadevent' => self::UPLOAD_EVENT,
+            'uploadfile' => $canupload,
             'repo_id' => $this->id,
             'contextid' => $this->context->id,
             'sesskey' => sesskey(),
         ];
+        if ($canupload) {
+            $listing['uploadevent'] = self::UPLOAD_EVENT;
+        }
+        return $listing;
     }
 
     /**

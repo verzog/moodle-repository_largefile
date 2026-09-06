@@ -196,4 +196,56 @@ final class import_policy_test extends \advanced_testcase {
         $this->expectException(\moodle_exception::class);
         import_policy::store_imported_file((int) $user->id, $src, 'lecture.mp4', import_policy::DEST_PICKER);
     }
+
+    /**
+     * The picker-enabled flag follows the destination setting.
+     *
+     * @return void
+     */
+    public function test_picker_enabled_reflects_setting(): void {
+        $this->resetAfterTest(true);
+        $this->assertTrue(import_policy::picker_enabled());
+        set_config('dest_picker', 0, 'largefile');
+        $this->assertFalse(import_policy::picker_enabled());
+    }
+
+    /**
+     * A direct upload is refused when the picker is disabled or the kind is not
+     * accepted, and allowed otherwise.
+     *
+     * @return void
+     */
+    public function test_upload_rejection_reason(): void {
+        $this->resetAfterTest(true);
+        // Unrestricted, picker enabled: anything is allowed in.
+        $this->assertNull(import_policy::upload_rejection_reason('lecture.mp4'));
+
+        // Picker disabled: refused whatever the kind.
+        set_config('dest_picker', 0, 'largefile');
+        $this->assertNotNull(import_policy::upload_rejection_reason('lecture.mp4'));
+        set_config('dest_picker', 1, 'largefile');
+
+        // Restricted with video off: a video upload is refused, a backup is not.
+        set_config('restricttypes', 1, 'largefile');
+        set_config('accept_video', 0, 'largefile');
+        $this->assertNotNull(import_policy::upload_rejection_reason('lecture.mp4'));
+        $this->assertNull(import_policy::upload_rejection_reason('course.mbz'));
+    }
+
+    /**
+     * When restriction is on but no kind is ticked, the plugin advertises no real
+     * type — in particular it does not claim to accept backups.
+     *
+     * @return void
+     */
+    public function test_supported_filetypes_empty_policy_hides_backups(): void {
+        $this->resetAfterTest(true);
+        set_config('restricttypes', 1, 'largefile');
+        foreach (['backup', 'scorm', 'imscc', 'video'] as $kind) {
+            set_config('accept_' . $kind, 0, 'largefile');
+        }
+        $types = import_policy::supported_filetypes();
+        $this->assertIsArray($types);
+        $this->assertNotContains('.mbz', $types);
+    }
 }

@@ -193,6 +193,13 @@ switch ($action) {
         } catch (\moodle_exception $e) {
             $senderror($e->getMessage());
         }
+        // Apply the same upload policy as a browser chunk upload: the fetched file's
+        // kind must be accepted and the picker must be an enabled destination.
+        $reason = \repository_largefile\local\import_policy::upload_rejection_reason($result['filename']);
+        if ($reason !== null) {
+            @unlink($result['path']);
+            $senderror($reason);
+        }
         if (!chunk_store::adopt_file($id, $result['path'], $result['filename'])) {
             @unlink($result['path']);
             $senderror(get_string('errordownloadfailed', 'repository_largefile'));
