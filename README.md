@@ -155,6 +155,25 @@ context, with no archetypes) — grant them explicitly to the administrators who
 should manage transfers. Expired or exhausted shares and stale nonces are removed
 by the `cleanup_chunks` scheduled task.
 
+## Accepted files and destinations
+
+The plugin's configuration page (*Site administration > Plugins > Repositories >
+Large file*) carries an **import policy**:
+
+- **Restrict accepted file types** (opt-in). Off by default — every file type is
+  accepted, as the plugin always did. Turn it on to accept only the ticked kinds:
+  **course backups** (`.mbz`), **SCORM packages** (`.zip`), **IMS Common
+  Cartridge** (`.imscc`) and **video**. The gate applies to every way in — the
+  Import page, the URL-import queue, and the chunked large-file uploader (a
+  rejected upload is refused at its first chunk, before any bytes are written).
+- **Destinations.** An imported file can be routed to your **private backup area**
+  (where it appears under *Restore > User private backup area*, ready to restore),
+  the **large file picker** (to pick into an activity — a video as a resource, a
+  SCORM package as a SCORM activity), or generic **private files**. Choose which
+  destinations are offered site-wide; the Import form only shows those that also
+  suit the file's kind, and a file whose kind has just one enabled destination is
+  routed there automatically.
+
 ## Scheduled, unattended transfers
 
 A **URL import** and a **peer-share import** both run entirely on the server, so

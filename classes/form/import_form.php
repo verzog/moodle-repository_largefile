@@ -57,6 +57,18 @@ class import_form extends \moodleform {
         $mform->addRule('shareurl', get_string('required'), 'required', null, 'client');
         $mform->addHelpButton('shareurl', 'importurl', 'repository_largefile');
 
+        // Where the recovered file should be stored. Only offered when the site
+        // enables more than one destination. "Automatic" (the default, empty value)
+        // routes to the file's kind default once fetched; the explicit choices are
+        // narrowed to that kind (a backup cannot go to the picker, etc.).
+        $destinations = \repository_largefile\local\import_policy::destination_menu();
+        if (count($destinations) > 1) {
+            $choices = ['' => get_string('destinationauto', 'repository_largefile')] + $destinations;
+            $mform->addElement('select', 'destination', get_string('importdestination', 'repository_largefile'), $choices);
+            $mform->setDefault('destination', '');
+            $mform->addHelpButton('destination', 'importdestination', 'repository_largefile');
+        }
+
         // Importing a large backup in the foreground can exceed the web server's
         // request timeout (a 504). Running it on the server avoids that.
         $mform->addElement('advcheckbox', 'background', get_string('importbackground', 'repository_largefile'));

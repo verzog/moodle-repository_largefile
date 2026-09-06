@@ -2,6 +2,27 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.4.0 — 2026-09-06
+
+- **Choose where an imported file goes, and restrict what the site accepts.** An
+  import (peer share or URL) can now be routed to a chosen **destination** — the
+  private backup area (restorable), the large file picker (to attach to an
+  activity), or generic private files — with the choices on the form narrowed to
+  the file's kind once it is fetched (a course backup can't go to the picker; a
+  SCORM/Cartridge/video can't go to the restore area). A new **admin policy** on
+  the plugin's configuration page can **restrict accepted file types** (course
+  backups `.mbz`, SCORM `.zip`, IMS Common Cartridge `.imscc`, video) and choose
+  which destinations are offered. Type restriction is **opt-in**: with it off (the
+  default) every file type is accepted, as before. When on, the accepted-type gate
+  applies to every ingest path — the import page, the URL-import queue, and the
+  chunked large-file uploader (both its browser-chunk and URL-fetch paths, rejected
+  before any bytes are kept). The destination chooser defaults to **Automatic**
+  (route by file kind), and disabling the picker destination also turns off direct
+  uploads into the picker. No schema change; the routing travels in the transfer's
+  existing payload.
+  <br>_A follow-up will add a specific course's backup area as a further
+  destination (with a course picker and capability checks)._
+
 ## 0.3.8 — 2026-09-04
 
 - **Imported peer backups now land where you can actually restore them.** A

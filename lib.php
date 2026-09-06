@@ -104,18 +104,25 @@ class repository_largefile extends repository {
             ];
         }
 
-        return [
+        // Only advertise the upload button when the picker is an enabled destination;
+        // when it is off, the plugin stages nothing into the picker (the upload
+        // dialogue's chunk and URL-fetch paths refuse it too).
+        $canupload = \repository_largefile\local\import_policy::picker_enabled();
+        $listing = [
             'list' => $list,
             'dynload' => false,
             'nologin' => true,
             'nosearch' => true,
             'norefresh' => false,
-            'uploadfile' => true,
-            'uploadevent' => self::UPLOAD_EVENT,
+            'uploadfile' => $canupload,
             'repo_id' => $this->id,
             'contextid' => $this->context->id,
             'sesskey' => sesskey(),
         ];
+        if ($canupload) {
+            $listing['uploadevent'] = self::UPLOAD_EVENT;
+        }
+        return $listing;
     }
 
     /**
@@ -180,7 +187,7 @@ class repository_largefile extends repository {
      * @return string The "all types" marker.
      */
     public function supported_filetypes() {
-        return '*';
+        return \repository_largefile\local\import_policy::supported_filetypes();
     }
 
     /**
@@ -207,7 +214,11 @@ class repository_largefile extends repository {
     public static function get_type_option_names() {
         return array_merge(
             parent::get_type_option_names(),
-            ['chunksize', 'state0duration', 'state1duration', 'state2duration']
+            ['chunksize', 'state0duration', 'state1duration', 'state2duration'],
+            // Import policy: opt-in type restriction, the accepted kinds, and the
+            // destinations an imported file may be routed to.
+            ['restricttypes', 'accept_backup', 'accept_scorm', 'accept_imscc', 'accept_video'],
+            ['dest_backuparea', 'dest_picker', 'dest_privatefiles']
         );
     }
 
@@ -240,6 +251,35 @@ class repository_largefile extends repository {
         $mform->addElement('duration', 'state2duration', get_string('setting:state2duration', 'repository_largefile'));
         $mform->setDefault('state2duration', 86400);
         $mform->addHelpButton('state2duration', 'setting:state2duration', 'repository_largefile');
+
+        // Import policy: which file kinds are accepted, and where an import may land.
+        $mform->addElement('header', 'largefilepolicyheader', get_string('setting:policyheader', 'repository_largefile'));
+
+        $mform->addElement('advcheckbox', 'restricttypes', get_string('setting:restricttypes', 'repository_largefile'));
+        $mform->setDefault('restricttypes', 0);
+        $mform->addHelpButton('restricttypes', 'setting:restricttypes', 'repository_largefile');
+
+        foreach (['backup', 'scorm', 'imscc', 'video'] as $kind) {
+            $mform->addElement(
+                'advcheckbox',
+                'accept_' . $kind,
+                get_string('setting:accept', 'repository_largefile'),
+                get_string('filetype_' . $kind, 'repository_largefile')
+            );
+            $mform->setDefault('accept_' . $kind, 1);
+            $mform->hideIf('accept_' . $kind, 'restricttypes', 'notchecked');
+        }
+
+        foreach (['backuparea', 'picker', 'privatefiles'] as $dest) {
+            $mform->addElement(
+                'advcheckbox',
+                'dest_' . $dest,
+                get_string('setting:destination', 'repository_largefile'),
+                get_string('destination_' . $dest, 'repository_largefile')
+            );
+            $mform->setDefault('dest_' . $dest, 1);
+        }
+        $mform->addHelpButton('dest_backuparea', 'setting:destination', 'repository_largefile');
 
         // Links to the plugin's management pages, so everything for this plugin is
         // reached one level under its own configuration page.

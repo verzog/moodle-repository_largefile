@@ -258,6 +258,13 @@ class chunk_store {
         if ((int) $record->maxlength !== -1 && $length > (int) $record->maxlength) {
             return get_string('errorfiletoobig', 'moodle', (int) $record->maxlength);
         }
+        // Enforce the site's upload policy at the first chunk, before any bytes are
+        // written: the picker must be an enabled destination and the file's kind
+        // must be accepted, so a rejected upload never lands on disk.
+        $reason = local\import_policy::upload_rejection_reason($filename);
+        if ($reason !== null) {
+            return $reason;
+        }
         if ($end > $length) {
             return 'Chunk is longer than specified length';
         }

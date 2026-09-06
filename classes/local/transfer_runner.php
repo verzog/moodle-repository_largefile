@@ -19,10 +19,12 @@
  *
  * Runs under cron (no session), so it never reads the current user: everything
  * it does is on behalf of the transfer's own {@see transfer_manager} row. A URL
- * import is fetched (SSRF-aware) and staged into the owner's file picker; a share
- * import is fetched, decrypted and verified ({@see share_client}) and saved into
- * the owner's private backup area, ready to restore. All outcomes are recorded back
- * on the transfer row so the admin monitor and the owner can see what happened.
+ * import is fetched (SSRF-aware); a share import is fetched, decrypted and verified
+ * ({@see share_client}). Either is then routed by {@see import_policy} to the
+ * destination recorded for the transfer — the large-file picker, the private backup
+ * area (restorable), or private files — defaulting to the picker for a URL import
+ * and the backup area for a peer share. All outcomes are recorded back on the
+ * transfer row so the admin monitor and the owner can see what happened.
  *
  * @package    repository_largefile
  * @copyright  2026 SCCA
@@ -87,12 +89,17 @@ class transfer_runner {
         $fetcher = new url_fetcher();
         $fetched = $fetcher->fetch($url, (int) ($CFG->maxbytes ?? 0));
 
+        // No recorded choice means "auto": the policy routes to the kind's default
+        // enabled destination (for a URL import, historically the large-file picker).
+        $destination = (string) ($payload['destination'] ?? '');
         $contextid = (int) ($transfer->contextid ?: \context_system::instance()->id);
-        $token = chunk_store::create_token_for((int) $transfer->userid, $contextid, -1);
-        if (!chunk_store::adopt_file($token, $fetched['path'], $fetched['filename'])) {
-            throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
-        }
-        return $fetched['filename'];
+        return import_policy::store_imported_file(
+            (int) $transfer->userid,
+            $fetched['path'],
+            $fetched['filename'],
+            $destination,
+            $contextid
+        );
     }
 
     /**
@@ -114,22 +121,17 @@ class transfer_runner {
         $shareurl = (string) ($payload['shareurl'] ?? '');
         $result = share_client::import($peerid, $shareurl);
 
-        $fs = get_file_storage();
-        $usercontext = \context_user::instance((int) $transfer->userid);
-        $filename = $result['filename'];
-        if ($fs->file_exists($usercontext->id, 'user', 'backup', 0, '/', $filename)) {
-            $filename = time() . '-' . $filename;
-        }
-        $fs->create_file_from_pathname([
-            'contextid' => $usercontext->id,
-            'component' => 'user',
-            'filearea' => 'backup',
-            'itemid' => 0,
-            'filepath' => '/',
-            'filename' => $filename,
-            'userid' => (int) $transfer->userid,
-        ], $result['path']);
-        @unlink($result['path']);
+        // No recorded choice means "auto": the policy routes to the kind's default
+        // enabled destination (for a peer share, historically the private backup area).
+        $destination = (string) ($payload['destination'] ?? '');
+        $contextid = (int) ($transfer->contextid ?: \context_system::instance()->id);
+        $filename = import_policy::store_imported_file(
+            (int) $transfer->userid,
+            $result['path'],
+            $result['filename'],
+            $destination,
+            $contextid
+        );
 
         // Emit the same domain event as the synchronous import path (import.php),
         // so audit integrations see every imported backup regardless of how it was
