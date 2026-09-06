@@ -70,18 +70,20 @@ $peers = peer_manager::menu();
 $form = new transfer_form($baseurl->out(false), ['peers' => $peers]);
 if ($data = $form->get_data()) {
     $when = ($data->when ?? 'now') === 'at' ? (int) $data->scheduledtime : 0;
+    // Empty means "auto": the policy routes to the file kind's default destination.
+    $destination = $data->destination ?? '';
     if ($data->type === transfer_manager::TYPE_SHARE && $peers) {
         transfer_manager::create(
             transfer_manager::TYPE_SHARE,
             (int) $USER->id,
-            ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl],
+            ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl, 'destination' => $destination],
             $when
         );
     } else {
         transfer_manager::create(
             transfer_manager::TYPE_URL,
             (int) $USER->id,
-            ['url' => $data->url],
+            ['url' => $data->url, 'destination' => $destination],
             $when,
             $context->id
         );

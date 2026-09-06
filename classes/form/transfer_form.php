@@ -66,6 +66,14 @@ class transfer_form extends \moodleform {
             $mform->hideIf('shareurl', 'type', 'neq', transfer_manager::TYPE_SHARE);
         }
 
+        // Where the fetched file should be stored, when the site offers a choice.
+        // The choices are narrowed to the file's kind once it is fetched.
+        $destinations = \repository_largefile\local\import_policy::destination_menu();
+        if (count($destinations) > 1) {
+            $mform->addElement('select', 'destination', get_string('importdestination', 'repository_largefile'), $destinations);
+            $mform->addHelpButton('destination', 'importdestination', 'repository_largefile');
+        }
+
         $when = [
             'now' => get_string('transferwhennow', 'repository_largefile'),
             'at' => get_string('transferwhenat', 'repository_largefile'),

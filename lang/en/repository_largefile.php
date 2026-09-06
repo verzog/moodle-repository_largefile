@@ -31,10 +31,14 @@ $string['cleanup_task'] = 'Clean up stale chunked uploads and expired shares';
 $string['configplugin'] = 'Large file repository settings';
 $string['createshare'] = 'Create share';
 $string['deletepeerconfirm'] = 'Delete this peer? Existing shares to it will stop working.';
+$string['destination_backuparea'] = 'Private backup area (restore)';
+$string['destination_picker'] = 'Large file picker (general use)';
+$string['destination_privatefiles'] = 'Private files';
 $string['editpeer'] = 'Edit peer';
 $string['errorbadurl'] = 'That does not look like a valid http(s) download URL.';
 $string['errorchunktoolarge'] = 'The server rejected an upload chunk as too large. Ask an administrator to lower the '
     . '"Chunk size (MB)" setting, then upload the file again.';
+$string['errordestnotallowed'] = 'A {$a} file cannot be sent to the chosen destination on this site.';
 $string['errordownloadempty'] = 'The URL returned an empty response.';
 $string['errordownloadfailed'] = 'The file could not be downloaded from that URL.';
 $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that URL.';
@@ -61,6 +65,7 @@ $string['errorsharesig'] = 'The request could not be authenticated (bad signatur
 $string['errorsharestale'] = 'The request has expired. Check that both sites\' clocks are correct, then try again.';
 $string['errortransferstalled'] = 'The transfer was interrupted too many times and has been abandoned.';
 $string['errortransferunknown'] = 'This transfer has an unknown type and cannot be run.';
+$string['errortypenotaccepted'] = 'This site does not accept {$a} files through the large file plugin.';
 $string['erroruploadfailed'] = 'The upload could not be completed after several attempts. Check your connection and try '
     . 'uploading the file again.';
 $string['eventbackupimported'] = 'Shared backup imported';
@@ -68,11 +73,21 @@ $string['eventsharecreated'] = 'Backup share created';
 $string['eventsharedownloaded'] = 'Backup share downloaded';
 $string['eventtransfercompleted'] = 'Scheduled transfer completed';
 $string['expiresnever'] = 'Never';
+$string['filetype_backup'] = 'Course backup (.mbz)';
+$string['filetype_imscc'] = 'IMS Common Cartridge (.imscc)';
+$string['filetype_other'] = 'other';
+$string['filetype_scorm'] = 'SCORM package (.zip)';
+$string['filetype_video'] = 'video';
 $string['importbackground'] = 'Import in the background';
 $string['importbackground_help'] = 'Recommended for large backups. The import runs on the server rather than in your '
     . 'browser, so it is not cut off by a web server request timeout (a 504 error). It is queued on the Transfers page and '
     . 'saved to your private backup area when it finishes, ready to restore.';
 $string['importbutton'] = 'Fetch and import';
+$string['importdestination'] = 'Store in';
+$string['importdestination_help'] = 'Where the fetched file is stored. The available choices are narrowed to the '
+    . 'file\'s kind once it is fetched: a course backup can go to your private backup area (ready to restore), while a '
+    . 'SCORM package, Common Cartridge or video goes to the large file picker (to pick into an activity). "Private files" '
+    . 'is generic storage that the course restore screen cannot read directly.';
 $string['importpeer'] = 'From peer';
 $string['importqueued'] = 'The import has been queued and will run in the background. Follow its progress on the Transfers page.';
 $string['importshared'] = 'Import a shared backup';
@@ -136,9 +151,18 @@ $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user th
 $string['revokeshare'] = 'Revoke';
 $string['revokeshareconfirm'] = 'Revoke this share? The peer will no longer be able to download it.';
 $string['selectuploaded'] = 'Select uploaded file';
+$string['setting:accept'] = 'Accept';
 $string['setting:chunksize'] = 'Chunk size (MB)';
 $string['setting:chunksize_help'] = 'Size of each chunk sent to the server when uploading a large file, in megabytes. '
     . 'Lower this if large uploads fail — some web servers, reverse proxies and firewalls reject large request bodies.';
+$string['setting:destination'] = 'Offer destination';
+$string['setting:destination_help'] = 'Which destinations an imported or uploaded file may be routed to. On the import '
+    . 'form the user only sees the destinations enabled here that also suit the file\'s kind (a course backup can go to the '
+    . 'private backup area or private files; a SCORM/Cartridge/video to the picker or private files).';
+$string['setting:policyheader'] = 'Accepted files and destinations';
+$string['setting:restricttypes'] = 'Restrict accepted file types';
+$string['setting:restricttypes_help'] = 'When enabled, only the file kinds ticked below are accepted by imports and the '
+    . 'large file uploader — anything else is rejected. When disabled (the default), every file type is accepted.';
 $string['setting:state0duration'] = 'Keep unused upload tokens for';
 $string['setting:state0duration_help'] = 'How long an upload token that was generated but never used is kept before the '
     . 'cleanup task removes it.';

@@ -48,14 +48,17 @@ $imported = null;
 if ($peers) {
     $form = new \repository_largefile\form\import_form($baseurl->out(false), ['peers' => $peers]);
     if ($data = $form->get_data()) {
+        // Empty means "auto": the policy routes to the file kind's default enabled
+        // destination (a peer share defaults to the private backup area).
+        $destination = $data->destination ?? '';
         if (!empty($data->background)) {
             // Run the import on the server, immune to the web request timeout that
             // a large backup would otherwise hit. It is picked up by the scheduled
-            // task and lands in the user's private files, like the direct import.
+            // task and routed to the chosen destination, like the direct import.
             transfer_manager::create(
                 transfer_manager::TYPE_SHARE,
                 (int) $USER->id,
-                ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl],
+                ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl, 'destination' => $destination],
                 0
             );
             redirect(
@@ -67,23 +70,16 @@ if ($peers) {
         raise_memory_limit(MEMORY_EXTRA);
         try {
             $result = share_client::import((int) $data->peerid, $data->shareurl);
-            // Store the recovered backup in the user's private backup area, so it
-            // appears under "User private backup area" on any course's restore
-            // screen (a one-click restore), which generic private files do not.
-            $fs = get_file_storage();
-            $usercontext = context_user::instance($USER->id);
-            $filename = $result['filename'];
-            if ($fs->file_exists($usercontext->id, 'user', 'backup', 0, '/', $filename)) {
-                $filename = time() . '-' . $filename;
-            }
-            $fs->create_file_from_pathname([
-                'contextid' => $usercontext->id,
-                'component' => 'user',
-                'filearea' => 'backup',
-                'itemid' => 0,
-                'filepath' => '/',
-                'filename' => $filename,
-            ], $result['path']);
+            // Route the recovered file to the chosen destination (default: the
+            // user's private backup area, restorable). The policy enforces the
+            // accepted-type and destination gates.
+            $filename = \repository_largefile\local\import_policy::store_imported_file(
+                (int) $USER->id,
+                $result['path'],
+                $result['filename'],
+                $destination,
+                $context->id
+            );
             $peer = peer_manager::get((int) $data->peerid);
             backup_imported::build((int) $USER->id, $peer ? $peer->name : '', $filename)->trigger();
             $imported = $filename;
