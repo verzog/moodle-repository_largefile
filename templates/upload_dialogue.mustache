@@ -51,6 +51,13 @@
                 <label for="largefile-fileinput">{{#str}} chooselargefile, repository_largefile {{/str}}</label>
                 <input type="file" class="form-control-file d-block" id="largefile-fileinput" data-region="fileinput">
             </div>
+            <div class="form-check" data-region="bgwrap" hidden>
+                <input type="checkbox" class="form-check-input" id="largefile-bgcheck" data-region="bgcheck">
+                <label class="form-check-label" for="largefile-bgcheck">
+                    {{#str}} bgupload, repository_largefile {{/str}}
+                </label>
+                <small class="form-text text-muted">{{#str}} bgupload_help, repository_largefile {{/str}}</small>
+            </div>
         </div>
         <div class="tab-pane" id="largefile-pane-url" role="tabpanel"
             aria-labelledby="largefile-tab-url" data-region="tab-url">

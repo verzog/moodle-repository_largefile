@@ -2,6 +2,22 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.5.0 — 2026-09-07
+
+- **Background upload that continues after you close the tab (experimental,
+  Chrome/Edge).** The upload dialogue now offers **"Keep uploading after I close
+  this page"** where the browser supports the Background Fetch API. Tick it and the
+  file is handed to the browser's background uploader through a **service worker**
+  (`sw.js`): it keeps going even if you close the tab, and the file appears in the
+  picker when it finishes. There is no progress bar in the dialogue while it runs —
+  the browser shows its own. The chunks arrive **out of order**, so the server now
+  reassembles them by byte offset and completes the upload once every byte has
+  landed (new `receivedmap` column on the chunks table, added by upgrade; writes
+  are idempotent and serialised per token). Browsers without Background Fetch
+  (Safari, Firefox) upload in the foreground as before, with resume (0.4.1).
+  <br>_Marked experimental: the background path depends on a browser feature and
+  an HTTPS origin, so verify it on your own Chrome/Edge + HTTPS site._
+
 ## 0.4.1 — 2026-09-07
 
 - **Resume a chunked upload after navigating away.** A large browser upload no

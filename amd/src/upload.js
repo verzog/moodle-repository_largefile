@@ -23,7 +23,10 @@
  * position with the server, so a large upload survives a dropped chunk. If the
  * page is left mid-upload, the server keeps the partial file and this module
  * remembers it (in localStorage), so re-selecting the same file on return carries
- * on from where it stopped instead of starting over.
+ * on from where it stopped instead of starting over. Where the browser supports it
+ * (Chrome/Edge, secure context), an optional Background Fetch mode uploads the file
+ * through a service worker so it continues even after the tab is closed; those
+ * chunks arrive out of order and the server reassembles them.
  *
  * @module     repository_largefile/upload
  * @copyright  2026 SCCA
@@ -60,8 +63,74 @@ const RESUME_KEY = 'repository_largefile_resume';
 /** @constant {number} Discard a resume record older than this (24 hours, in ms). */
 const RESUME_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * @constant {boolean} Whether this browser can continue an upload after the tab is
+ * closed: a secure context with a service worker and the Background Fetch API
+ * (Chrome/Edge). Elsewhere the upload is foreground-only (with resume).
+ */
+const BG_SUPPORTED = typeof window !== 'undefined' && window.isSecureContext
+    && 'serviceWorker' in navigator && 'BackgroundFetchManager' in window;
+
 /** @var {boolean} Whether the pubsub listener has been registered. */
 let listenersRegistered = false;
+
+/** @var {Promise|null} Memoised service-worker registration for Background Fetch. */
+let swRegistrationPromise = null;
+
+/**
+ * Register (once) the plugin's service worker, which owns Background Fetch uploads
+ * so they continue after the page closes. Its scope is the plugin directory, which
+ * covers the upload endpoint.
+ *
+ * @return {Promise} Resolves with the ServiceWorkerRegistration.
+ */
+const getServiceWorker = () => {
+    if (swRegistrationPromise === null) {
+        const scope = config.wwwroot + '/repository/largefile/';
+        swRegistrationPromise = navigator.serviceWorker.register(scope + 'sw.js', {scope})
+            .then((registration) => navigator.serviceWorker.ready.then(() => registration));
+    }
+    return swRegistrationPromise;
+};
+
+/**
+ * Hand a local file to the browser's Background Fetch so its chunks keep uploading
+ * even after this page is closed. Each chunk is an independent POST to bgchunk that
+ * the server writes at its byte offset; the server marks the upload complete once
+ * every byte has arrived, so the chunks may run in any order.
+ *
+ * @param {File} file The file to upload.
+ * @param {object} token The {id, chunksize, maxbytes} allocated for it.
+ * @return {Promise} Resolves once the background fetch is registered.
+ */
+const startBackgroundUpload = async(file, token) => {
+    // Record the total length and file name up front — chunks arrive out of order,
+    // possibly after the page has gone, so the accepted-type policy is enforced now.
+    const started = await postRequest(
+        {action: 'bgstart', id: token.id, length: file.size, filename: file.name}, null, null, null, null);
+    const startedResponse = parseJson(started.text);
+    if (started.status !== 200 || startedResponse === null || startedResponse.error !== undefined) {
+        throw new Error(startedResponse && startedResponse.error
+            ? startedResponse.error : await getString('erroruploadfailed', 'repository_largefile'));
+    }
+    const registration = await getServiceWorker();
+    const chunkSize = token.chunksize;
+    const requests = [];
+    for (let start = 0; start < file.size; start += chunkSize) {
+        const end = Math.min(start + chunkSize, file.size);
+        const qs = 'action=bgchunk&id=' + encodeURIComponent(token.id)
+            + '&start=' + start + '&end=' + end + '&sesskey=' + encodeURIComponent(config.sesskey);
+        requests.push(new Request(config.wwwroot + ENDPOINT + '?' + qs, {
+            method: 'post',
+            body: file.slice(start, end),
+            headers: {'Content-Type': 'application/octet-stream'},
+        }));
+    }
+    await registration.backgroundFetch.fetch('repository_largefile-' + token.id, requests, {
+        title: file.name,
+        downloadTotal: file.size,
+    });
+};
 
 /**
  * Read the whole resume map from localStorage, tolerating storage being
@@ -358,6 +427,9 @@ const openUploadModal = async(data) => {
     // selected file matches it.
     let pendingResume = null;
     let resumeActive = false;
+    // Set once a file has been handed to Background Fetch: the browser now owns the
+    // upload, so closing the dialogue must not delete its token.
+    let backgroundHandedOff = false;
 
     const el = (selector) => root.find(selector).get(0);
     const setStatus = (text) => {
@@ -392,6 +464,10 @@ const openUploadModal = async(data) => {
         }
     };
     const abort = () => {
+        // A background-fetch upload keeps running on its own; never tear it down.
+        if (backgroundHandedOff) {
+            return;
+        }
         controller.cancelled = true;
         if (controller.xhr) {
             controller.xhr.abort();
@@ -456,11 +532,29 @@ const openUploadModal = async(data) => {
     };
     window.addEventListener('beforeunload', beforeUnload);
 
+    // When a background upload finishes, the service worker messages any open page;
+    // refresh the picker so the completed file appears without a manual reopen.
+    const onSwMessage = (e) => {
+        if (e.data && e.data.type === 'repository_largefile_bgcomplete') {
+            data.callback();
+        }
+    };
+    if (BG_SUPPORTED && navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', onSwMessage);
+    }
+
     root.on(ModalEvents.shown, async() => {
         selectedFile = null;
         resumeActive = false;
         busy = false;
         setProgress(0, 1);
+        // Offer "keep uploading after I close this page" only where the browser can.
+        if (BG_SUPPORTED) {
+            const bgwrap = el('[data-region="bgwrap"]');
+            if (bgwrap) {
+                bgwrap.hidden = false;
+            }
+        }
         const input = el('[data-region="fileinput"]');
         if (input) {
             input.addEventListener('change', async() => {
@@ -486,6 +580,9 @@ const openUploadModal = async(data) => {
     root.on(ModalEvents.cancel, abort);
     root.on(ModalEvents.hidden, () => {
         window.removeEventListener('beforeunload', beforeUnload);
+        if (BG_SUPPORTED && navigator.serviceWorker) {
+            navigator.serviceWorker.removeEventListener('message', onSwMessage);
+        }
         abort();
         modal.destroy();
     });
@@ -527,6 +624,28 @@ const openUploadModal = async(data) => {
                 const resuming = resumeActive && pendingResume
                     && selectedFile.name === pendingResume.filename
                     && selectedFile.size === pendingResume.size;
+                const bgCheck = el('[data-region="bgcheck"]');
+                if (BG_SUPPORTED && bgCheck && bgCheck.checked && !resuming) {
+                    // Hand the upload to Background Fetch: it keeps running after the
+                    // page closes, so this dialogue's job is done once it is registered.
+                    const bgtoken = await newToken(data.contextId, controller);
+                    if (bgtoken.maxbytes > 0 && selectedFile.size > bgtoken.maxbytes) {
+                        throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
+                    }
+                    setStatus(await getString('bgstarting', 'repository_largefile'));
+                    await startBackgroundUpload(selectedFile, bgtoken);
+                    backgroundHandedOff = true;
+                    controller.token = null;
+                    writeResume(data.contextId, null);
+                    modal.hide();
+                    const notice = await Promise.all([
+                        getString('pluginname', 'repository_largefile'),
+                        getString('bgstarted', 'repository_largefile'),
+                        getString('ok', 'core'),
+                    ]);
+                    Notification.alert(notice[0], notice[1], notice[2]);
+                    return;
+                }
                 if (resuming) {
                     // Carry on with the existing server-side token from where it stopped.
                     tokenId = pendingResume.token;
