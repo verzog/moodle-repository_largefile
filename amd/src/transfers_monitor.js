@@ -28,32 +28,74 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-/** @var {number|null} The active poll timer, so a re-init never stacks two. */
+/** @var {number|null} The pending poll timer, so a re-init never stacks two loops. */
 let timer = null;
 
+/** @var {number} Bumped on every init so a stale scheduling loop stops itself. */
+let generation = 0;
+
 /**
- * Fetch the current region markup and swap it into place. Any failure (network,
- * a non-200, a missing region) is swallowed so a single bad tick never stops the
- * polling — the next tick tries again.
+ * Fetch the current region markup and swap it into place. The endpoint returns
+ * JSON ({html: ...}); a response that was redirected (an expired session sends
+ * this fetch to the login page, which still arrives as 200) or is not our JSON is
+ * refused, so the login page is never injected into the region. Any failure
+ * (network, a non-200, a missing region) is swallowed so a single bad tick never
+ * stops the polling — the next tick tries again.
  *
- * @param {string} url The AJAX endpoint returning the region's HTML.
+ * @param {string} url The AJAX endpoint returning the region's HTML as JSON.
  * @param {string} region The id of the element whose contents are replaced.
  * @return {Promise} Resolves once the tick is done.
  */
 const refresh = async(url, region) => {
     try {
         const response = await fetch(url, {credentials: 'same-origin'});
-        if (!response.ok) {
+        // response.redirected catches an expired-session redirect to the login
+        // page; a non-JSON body (the login page is HTML) fails the parse below.
+        if (!response.ok || response.redirected) {
             return;
         }
-        const html = await response.text();
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            return;
+        }
+        if (!data || typeof data.html !== 'string') {
+            return;
+        }
         const target = document.getElementById(region);
         if (target) {
-            target.innerHTML = html;
+            target.innerHTML = data.html;
         }
     } catch (e) {
         // A transient failure just skips this tick; the next one retries.
     }
+};
+
+/**
+ * Schedule the next poll one interval after the previous one *settles*, rather
+ * than on a fixed timer: a slow endpoint or network then never starts a second
+ * request while the first is in flight, so responses cannot arrive out of order
+ * and overwrite newer progress, and a sustained slowdown cannot pile up requests.
+ *
+ * @param {string} url The AJAX endpoint.
+ * @param {string} region The id of the element whose contents are replaced.
+ * @param {number} interval Milliseconds between polls.
+ * @param {number} mygen The scheduling generation this loop belongs to.
+ * @return {void}
+ */
+const schedule = (url, region, interval, mygen) => {
+    timer = window.setTimeout(async() => {
+        // Only poll while the tab is visible, to avoid needless load in the
+        // background; the region is already current from the initial page render.
+        if (document.visibilityState === 'visible') {
+            await refresh(url, region);
+        }
+        // A newer init() has superseded this loop — stop rather than double up.
+        if (mygen === generation) {
+            schedule(url, region, interval, mygen);
+        }
+    }, interval);
 };
 
 /**
@@ -67,13 +109,8 @@ export const init = (config) => {
     const region = config.region;
     const interval = config.interval || 5000;
     if (timer !== null) {
-        window.clearInterval(timer);
+        window.clearTimeout(timer);
     }
-    timer = window.setInterval(() => {
-        // Only poll while the tab is visible, to avoid needless load in the
-        // background; the region is already current from the initial page render.
-        if (document.visibilityState === 'visible') {
-            refresh(url, region);
-        }
-    }, interval);
+    generation++;
+    schedule(url, region, interval, generation);
 };

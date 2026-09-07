@@ -44,10 +44,14 @@ manage_page::setup($baseurl, get_string('transfers', 'repository_largefile'));
 // Live-refresh endpoint: return just the uploads-in-progress region so the page's
 // JS can poll it every few seconds without reloading the whole page (which would
 // disturb the admin's "queue a new transfer" form). Read-only and admin-gated by
-// the capability check above; the sesskey keeps it same-origin.
+// the capability check above; the sesskey keeps it same-origin. The region is
+// returned as JSON so that if the session has expired — require_login() then
+// redirects this fetch to the login page, which still arrives as HTTP 200 — the
+// client can tell the login page from a real fragment and refuse to inject it.
 if (optional_param('ajax', '', PARAM_ALPHA) === 'uploads') {
     require_sesskey();
-    echo manage_page::active_uploads_html();
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['html' => manage_page::active_uploads_html()]);
     die;
 }
 

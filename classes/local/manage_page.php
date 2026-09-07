@@ -113,6 +113,16 @@ class manage_page {
                 \core\output\notification::NOTIFY_INFO
             );
         }
+        // Bulk-load the distinct upload owners in one query rather than one per row:
+        // this renderer now runs on a short poll, so a per-row user lookup would be
+        // an N+1 query source repeated every few seconds for every watching admin.
+        $userids = [];
+        foreach ($active as $row) {
+            if ($row->userid) {
+                $userids[(int) $row->userid] = true;
+            }
+        }
+        $users = $userids ? $DB->get_records_list('user', 'id', array_keys($userids)) : [];
         $table = new \html_table();
         $table->head = [
             get_string('transferuser', 'repository_largefile'),
@@ -122,7 +132,7 @@ class manage_page {
             get_string('uploadlastactivity', 'repository_largefile'),
         ];
         foreach ($active as $row) {
-            $user = $row->userid ? \core_user::get_user($row->userid) : null;
+            $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
             $length = (int) $row->length;
             $pct = $length > 0 ? round((int) $row->currentpos * 100 / $length) . '%' : '—';
             // A Background Fetch upload keeps streaming even after its tab is closed;
