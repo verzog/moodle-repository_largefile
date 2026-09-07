@@ -114,6 +114,39 @@ if ($action === 'removeallstalled') {
     echo $OUTPUT->footer();
     exit;
 }
+// Remove a single completed-but-unselected upload (a staged file the owner uploaded
+// but never picked into an activity), to reclaim its disk. delete_in_state() locks
+// and confirms the row is still completed before deleting.
+if ($action === 'removecompleted') {
+    require_sesskey();
+    $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    $outcome = $uploadid !== ''
+        ? \repository_largefile\chunk_store::delete_in_state($uploadid, \repository_largefile\chunk_store::STATE_COMPLETED)
+        : 'notstarted';
+    $messages = [
+        'removed' => 'uploadremoved',
+        'notstarted' => 'uploadalreadyfinished',
+        'failed' => 'uploadremovefailed',
+    ];
+    redirect($baseurl, get_string($messages[$outcome], 'repository_largefile'));
+}
+// Remove every completed-but-unselected upload at once. Destructive (each is a file
+// the owner uploaded and might still intend to use), so it confirms first.
+if ($action === 'removeallcompleted') {
+    require_sesskey();
+    if (optional_param('confirm', 0, PARAM_BOOL)) {
+        $removed = \repository_largefile\chunk_store::delete_all_in_state(\repository_largefile\chunk_store::STATE_COMPLETED);
+        redirect($baseurl, get_string('uploadsremoved', 'repository_largefile', $removed));
+    }
+    echo $OUTPUT->header();
+    echo $OUTPUT->confirm(
+        get_string('confirmremoveallcompleted', 'repository_largefile'),
+        new moodle_url($baseurl, ['action' => 'removeallcompleted', 'confirm' => 1, 'sesskey' => sesskey()]),
+        $baseurl
+    );
+    echo $OUTPUT->footer();
+    exit;
+}
 
 $peers = peer_manager::menu();
 $form = new transfer_form($baseurl->out(false), ['peers' => $peers]);
@@ -170,6 +203,40 @@ if ($DB->count_records('repository_largefile_chunks', ['state' => \repository_la
             new moodle_url($baseurl, ['action' => 'removeallstalled', 'sesskey' => sesskey()]),
             get_string('removeallstalled', 'repository_largefile'),
             ['class' => 'btn btn-secondary']
+        ),
+        'mb-3'
+    );
+}
+
+// Completed uploads: files that finished uploading but were never selected into an
+// activity, so they still occupy the chunk area (until used or the cleanup task
+// removes them). Hidden behind a toggle since they are usually of no concern — an
+// admin reclaiming disk can reveal them and delete them individually or in bulk.
+$completedcount = $DB->count_records(
+    'repository_largefile_chunks',
+    ['state' => \repository_largefile\chunk_store::STATE_COMPLETED]
+);
+$showcompleted = optional_param('showcompleted', 0, PARAM_BOOL);
+if ($showcompleted) {
+    echo $OUTPUT->heading(get_string('completeduploads', 'repository_largefile'), 3);
+    echo html_writer::tag('p', get_string('completeduploads_desc', 'repository_largefile'), ['class' => 'text-muted']);
+    echo manage_page::completed_uploads_html($baseurl);
+    if ($completedcount > 1) {
+        echo html_writer::div(
+            html_writer::link(
+                new moodle_url($baseurl, ['action' => 'removeallcompleted', 'sesskey' => sesskey()]),
+                get_string('removeallcompleted', 'repository_largefile'),
+                ['class' => 'btn btn-secondary']
+            ),
+            'mb-3'
+        );
+    }
+    echo html_writer::div(html_writer::link($baseurl, get_string('hidecompleteduploads', 'repository_largefile')), 'mb-3');
+} else {
+    echo html_writer::div(
+        html_writer::link(
+            new moodle_url($baseurl, ['showcompleted' => 1]),
+            get_string('showcompleteduploads', 'repository_largefile', $completedcount)
         ),
         'mb-3'
     );

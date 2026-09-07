@@ -421,4 +421,42 @@ final class chunk_store_test extends \advanced_testcase {
         // Nothing left to remove on a second run.
         $this->assertSame(0, chunk_store::delete_all_started());
     }
+
+    /**
+     * delete_in_state() and delete_all_in_state() also clear completed uploads (staged
+     * files never selected), and the state guard stops one path deleting the other's
+     * uploads.
+     *
+     * @return void
+     */
+    public function test_delete_completed_uploads(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $ctx = \context_system::instance()->id;
+
+        // A completed staged upload.
+        $done = chunk_store::create_token($ctx, -1);
+        $donerec = chunk_store::get_record($done);
+        $this->assertNull(chunk_store::apply_start($donerec, 0, 300, 300, 'done.bin', random_bytes(300)));
+        $this->assertTrue(chunk_store::is_complete($done));
+
+        // The "stalled" path refuses it (wrong state), the completed path removes it.
+        $this->assertSame('notstarted', chunk_store::delete_in_state($done, chunk_store::STATE_STARTED));
+        $this->assertNotNull(chunk_store::get_record($done));
+        $this->assertSame('removed', chunk_store::delete_in_state($done, chunk_store::STATE_COMPLETED));
+        $this->assertNull(chunk_store::get_record($done));
+
+        // Bulk clear of completed uploads leaves an in-progress one alone.
+        $c1 = chunk_store::create_token($ctx, -1);
+        $this->assertNull(chunk_store::apply_start(chunk_store::get_record($c1), 0, 100, 100, 'c1.bin', random_bytes(100)));
+        $c2 = chunk_store::create_token($ctx, -1);
+        $this->assertNull(chunk_store::apply_start(chunk_store::get_record($c2), 0, 100, 100, 'c2.bin', random_bytes(100)));
+        $started = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($started), 1000, 'v.mp4');
+
+        $this->assertSame(2, chunk_store::delete_all_in_state(chunk_store::STATE_COMPLETED));
+        $this->assertNull(chunk_store::get_record($c1));
+        $this->assertNull(chunk_store::get_record($c2));
+        $this->assertNotNull(chunk_store::get_record($started));
+    }
 }

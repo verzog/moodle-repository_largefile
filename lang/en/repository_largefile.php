@@ -35,7 +35,13 @@ $string['bgupload_help'] = 'Uses your browser\'s background upload (Chrome and E
     . 'browser shows its own. Other browsers upload in the foreground instead (which you can resume if you navigate away).';
 $string['chooselargefile'] = 'Choose a large file';
 $string['cleanup_task'] = 'Clean up stale chunked uploads and expired shares';
+$string['completeduploads'] = 'Completed uploads';
+$string['completeduploads_desc'] = 'Files that finished uploading but were never selected into an activity, so they '
+    . 'still occupy disk in the upload staging area until they are used or the cleanup task removes them. '
+    . 'Remove any you know are no longer needed to reclaim the space.';
 $string['configplugin'] = 'Large file repository settings';
+$string['confirmremoveallcompleted'] = 'Remove all completed-but-unused uploads and their files? This frees the disk they '
+    . 'occupy, but each is a file its owner uploaded and may still intend to select into an activity.';
 $string['confirmremoveallstalled'] = 'Remove all in-progress uploads and their partial files? This frees the disk they '
     . 'use, but any upload that is still genuinely streaming will be interrupted.';
 $string['createshare'] = 'Create share';
@@ -92,6 +98,7 @@ $string['filetype_imscc'] = 'IMS Common Cartridge (.imscc)';
 $string['filetype_other'] = 'other';
 $string['filetype_scorm'] = 'SCORM package (.zip)';
 $string['filetype_video'] = 'video';
+$string['hidecompleteduploads'] = 'Hide completed uploads';
 $string['importbackground'] = 'Import in the background';
 $string['importbackground_help'] = 'Recommended for large backups. The import runs on the server rather than in your '
     . 'browser, so it is not cut off by a web server request timeout (a 504 error). It is queued on the Transfers page and '
@@ -124,6 +131,7 @@ $string['managepeers_desc'] = 'A trusted peer is another site running this plugi
 $string['manageshares'] = 'Backup shares';
 $string['manageshares_desc'] = 'Publish a backup to a trusted peer as an encrypted, expiring, download-limited link. The '
     . 'file is encrypted at rest and only the paired peer, signing with the shared secret, can fetch it.';
+$string['nocompleteduploads'] = 'No completed uploads are waiting in the staging area.';
 $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
 $string['notransfers'] = 'No transfers have been queued yet.';
@@ -165,6 +173,7 @@ $string['privacy:metadata:repository_largefile_transfers:status'] = 'The current
 $string['privacy:metadata:repository_largefile_transfers:timecreated'] = 'The time the transfer was queued.';
 $string['privacy:metadata:repository_largefile_transfers:type'] = 'The kind of transfer (URL or peer-share import).';
 $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user the transfer runs for.';
+$string['removeallcompleted'] = 'Remove all completed uploads';
 $string['removeallstalled'] = 'Remove all stalled uploads';
 $string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
     . 'file to carry on where you left off, or choose a different file to start over.';
@@ -217,6 +226,7 @@ $string['sharequeued'] = 'The share is being created in the background. It will 
     . 'below, and its link in the shares list, when it is ready.';
 $string['sharesheading'] = 'Published shares';
 $string['sharingmanagement'] = 'Backup sharing';
+$string['showcompleteduploads'] = 'Show completed uploads ({$a})';
 $string['tabupload'] = 'Upload a large file';
 $string['taburl'] = 'From a URL';
 $string['task:processtransfers'] = 'Run queued large-file transfers';
@@ -268,7 +278,8 @@ $string['uploadnotfinished'] = 'The upload did not finish.';
 $string['uploadremoved'] = 'Upload removed.';
 $string['uploadremovefailed'] = 'The upload could not be removed; it will be cleared by the cleanup task. Try again shortly.';
 $string['uploadsinprogress'] = 'Uploads in progress';
-$string['uploadsremoved'] = 'Removed {$a} stalled upload(s).';
+$string['uploadsize'] = 'Size';
+$string['uploadsremoved'] = 'Removed {$a} upload(s).';
 $string['url'] = 'File URL';
 $string['url_help'] = 'Paste a direct http(s) download link (for example a signed S3 link). The site fetches it on the '
     . 'server, so it is not limited by the browser upload size. The site upload limit still applies.';

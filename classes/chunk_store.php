@@ -667,6 +667,24 @@ class chunk_store {
      *         could not be unlinked and the row was kept for the cleanup task).
      */
     public static function delete_if_started(string $id): string {
+        return self::delete_in_state($id, self::STATE_STARTED);
+    }
+
+    /**
+     * Remove an upload on demand — its row and its file — but only while it is in the
+     * expected state, re-checked under the same per-token lock the background writer
+     * uses. Removing an in-progress upload (STATE_STARTED) reclaims a stalled partial;
+     * removing a completed one (STATE_COMPLETED) discards a staged file the owner
+     * uploaded but has not yet selected. The state guard means a stale link cannot
+     * delete an upload that has since moved on, and the true outcome is reported.
+     *
+     * @param string $id The upload token id.
+     * @param int $state The state the row must still be in (a STATE_* constant).
+     * @return string 'removed', 'notstarted' (unknown or no longer in that state —
+     *         nothing removed), or 'failed' (lock unavailable, or the file could not
+     *         be unlinked and the row was kept for the cleanup task).
+     */
+    public static function delete_in_state(string $id, int $state): string {
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($id, 10);
         if (!$lock) {
@@ -674,11 +692,11 @@ class chunk_store {
         }
         try {
             $record = self::get_record($id);
-            if (!$record || (int) $record->state !== self::STATE_STARTED) {
+            if (!$record || (int) $record->state !== $state) {
                 return 'notstarted';
             }
             self::delete($id);
-            // A surviving row means delete() could not unlink the partial file.
+            // A surviving row means delete() could not unlink the file.
             return self::get_record($id) ? 'failed' : 'removed';
         } finally {
             $lock->release();
@@ -694,11 +712,24 @@ class chunk_store {
      * @return int How many uploads were actually removed.
      */
     public static function delete_all_started(): int {
+        return self::delete_all_in_state(self::STATE_STARTED);
+    }
+
+    /**
+     * Remove every upload site-wide currently in the given state, each through
+     * {@see self::delete_in_state()} so the same lock and state re-check apply. For an
+     * admin reclaiming disk — STATE_STARTED clears stalled partials, STATE_COMPLETED
+     * clears staged files that were uploaded but never selected.
+     *
+     * @param int $state The state to clear (a STATE_* constant).
+     * @return int How many uploads were actually removed.
+     */
+    public static function delete_all_in_state(int $state): int {
         global $DB;
-        $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'state = :state', ['state' => self::STATE_STARTED]);
+        $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'state = :state', ['state' => $state]);
         $removed = 0;
         foreach ($ids as $id) {
-            if (self::delete_if_started((string) $id) === 'removed') {
+            if (self::delete_in_state((string) $id, $state) === 'removed') {
                 $removed++;
             }
         }

@@ -161,4 +161,33 @@ final class manage_page_test extends \advanced_testcase {
         $this->assertStringContainsString('99%', $html);
         $this->assertStringNotContainsString('100%', $html);
     }
+
+    /**
+     * The completed-uploads table shows the empty-state notice with none, and lists a
+     * completed staged upload with its file and a Remove action targeting it.
+     *
+     * @return void
+     */
+    public function test_completed_uploads_html(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+        $baseurl = new \moodle_url('/repository/largefile/transfers.php');
+
+        // None yet: the empty-state notice.
+        $this->assertStringContainsString(
+            get_string('nocompleteduploads', 'repository_largefile'),
+            manage_page::completed_uploads_html($baseurl)
+        );
+
+        // A completed (staged, unselected) upload is listed with a Remove action.
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        $rec = chunk_store::get_record($id);
+        $this->assertNull(chunk_store::apply_start($rec, 0, 400, 400, 'staged.mbz', random_bytes(400)));
+        $this->assertTrue(chunk_store::is_complete($id));
+
+        $html = manage_page::completed_uploads_html($baseurl);
+        $this->assertStringContainsString('staged.mbz', $html);
+        $this->assertStringContainsString('action=removecompleted', $html);
+        $this->assertStringContainsString('uploadid=' . $id, $html);
+    }
 }

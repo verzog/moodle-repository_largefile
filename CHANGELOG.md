@@ -10,6 +10,12 @@ All notable changes to `repository_largefile` are documented here.
   for reclaiming disk when stalled uploads have built up in the chunk area. Each
   removal goes through the same lock and state re-check as the per-row Remove, so a
   partial that has completed in the meantime is left alone. No schema change.
+- **See and clear completed-but-unused uploads.** A **Show completed uploads**
+  toggle on the Transfers page reveals files that finished uploading but were never
+  selected into an activity — they sit in the staging area consuming disk until used
+  or swept by the cleanup task (default 24h). Each has a **Remove** link, with a
+  **Remove all completed uploads** button (both confirmed), so an admin can reclaim
+  that space directly. Same lock/state-checked deletion.
 
 ## 0.6.4 — 2026-09-07
 
