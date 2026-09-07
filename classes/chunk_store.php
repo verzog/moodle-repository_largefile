@@ -478,25 +478,42 @@ class chunk_store {
             return 'Filechunk is not as long as it should be.';
         }
 
-        $dirpath = self::get_base_folder();
-        if (!file_exists($dirpath)) {
-            mkdir($dirpath, $CFG->directorypermissions, true);
+        // Write and record under the per-token lock, which a concurrent admin removal
+        // ({@see self::delete_in_state()}) also holds: so a removal cannot see this
+        // upload as still in progress and then delete a file this call is completing,
+        // and — because the row is re-checked here first — a removal that already ran
+        // cannot be raced into recreating an orphaned file for a deleted upload.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            return 'Could not acquire the upload lock.';
         }
-        // Only advance the stored position by the bytes actually persisted, so a
-        // short write (disk full, quota) can never mark the upload further along
-        // than the file really is — which would hand the picker a truncated file.
-        $written = file_put_contents(self::get_path_for_id($record->id), $content);
-        if ($written === false || $written !== strlen($content)) {
-            return 'Failed to write chunk to disk.';
-        }
+        try {
+            if (!self::get_record($record->id)) {
+                return 'The upload was cancelled.';
+            }
+            $dirpath = self::get_base_folder();
+            if (!file_exists($dirpath)) {
+                mkdir($dirpath, $CFG->directorypermissions, true);
+            }
+            // Only advance the stored position by the bytes actually persisted, so a
+            // short write (disk full, quota) can never mark the upload further along
+            // than the file really is — which would hand the picker a truncated file.
+            $written = file_put_contents(self::get_path_for_id($record->id), $content);
+            if ($written === false || $written !== strlen($content)) {
+                return 'Failed to write chunk to disk.';
+            }
 
-        $record->currentpos = $end;
-        $record->length = $length;
-        $record->lastmodified = time();
-        $record->state = $end === $length ? self::STATE_COMPLETED : self::STATE_STARTED;
-        $record->filename = $filename;
-        $DB->update_record(self::TABLE, $record);
-        return null;
+            $record->currentpos = $end;
+            $record->length = $length;
+            $record->lastmodified = time();
+            $record->state = $end === $length ? self::STATE_COMPLETED : self::STATE_STARTED;
+            $record->filename = $filename;
+            $DB->update_record(self::TABLE, $record);
+            return null;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -523,48 +540,65 @@ class chunk_store {
         if (strlen($content) !== $end - $start) {
             return 'Filechunk is not as long as it should be.';
         }
-        $path = self::get_path_for_id($record->id);
-        if ($path === null || !file_exists($path)) {
-            return 'Begin of file does not exist on this server.';
-        }
 
-        $currentpos = (int) $record->currentpos;
-        if ($end > $currentpos) {
-            // Trust the stored position: drop any bytes an interrupted retry left
-            // past it, then write only the portion beyond currentpos.
-            $handle = fopen($path, 'r+b');
-            if ($handle === false) {
+        // Serialise on the per-token lock a concurrent admin removal also holds, so a
+        // removal cannot see this upload in progress and then delete a file this call
+        // is completing. The row is re-checked inside the lock: if a removal already
+        // took it, this returns cleanly instead of writing on into a deleted upload.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            return 'Could not acquire the upload lock.';
+        }
+        try {
+            if (!self::get_record($record->id)) {
+                return 'The upload was cancelled.';
+            }
+            $path = self::get_path_for_id($record->id);
+            if ($path === null || !file_exists($path)) {
                 return 'Begin of file does not exist on this server.';
             }
-            $towrite = substr($content, $currentpos - $start);
-            if (ftruncate($handle, $currentpos) === false || fseek($handle, $currentpos) !== 0) {
+
+            $currentpos = (int) $record->currentpos;
+            if ($end > $currentpos) {
+                // Trust the stored position: drop any bytes an interrupted retry left
+                // past it, then write only the portion beyond currentpos.
+                $handle = fopen($path, 'r+b');
+                if ($handle === false) {
+                    return 'Begin of file does not exist on this server.';
+                }
+                $towrite = substr($content, $currentpos - $start);
+                if (ftruncate($handle, $currentpos) === false || fseek($handle, $currentpos) !== 0) {
+                    fclose($handle);
+                    return 'Could not position the upload file for writing.';
+                }
+                // Advance the stored position only by the bytes fwrite actually
+                // persisted, so a short write (disk full, quota) never marks the
+                // upload further along than the file really is; the client then
+                // resumes from the true position. Persist that position before
+                // reporting the failure so the resume is accurate.
+                $written = fwrite($handle, $towrite);
                 fclose($handle);
-                return 'Could not position the upload file for writing.';
+                if ($written === false) {
+                    return 'Failed to write chunk to disk.';
+                }
+                $record->currentpos = $currentpos + $written;
+                if ($written < strlen($towrite)) {
+                    $record->state = self::STATE_STARTED;
+                    $record->lastmodified = time();
+                    $DB->update_record(self::TABLE, $record);
+                    return 'Failed to write the whole chunk to disk.';
+                }
             }
-            // Advance the stored position only by the bytes fwrite actually
-            // persisted, so a short write (disk full, quota) never marks the
-            // upload further along than the file really is; the client then
-            // resumes from the true position. Persist that position before
-            // reporting the failure so the resume is accurate.
-            $written = fwrite($handle, $towrite);
-            fclose($handle);
-            if ($written === false) {
-                return 'Failed to write chunk to disk.';
-            }
-            $record->currentpos = $currentpos + $written;
-            if ($written < strlen($towrite)) {
-                $record->state = self::STATE_STARTED;
-                $record->lastmodified = time();
-                $DB->update_record(self::TABLE, $record);
-                return 'Failed to write the whole chunk to disk.';
-            }
+            // Otherwise the whole chunk is already stored — accept it as a no-op.
+            $record->state = (int) $record->currentpos === (int) $record->length
+                ? self::STATE_COMPLETED : self::STATE_STARTED;
+            $record->lastmodified = time();
+            $DB->update_record(self::TABLE, $record);
+            return null;
+        } finally {
+            $lock->release();
         }
-        // Otherwise the whole chunk is already stored — accept it as a no-op.
-        $record->state = (int) $record->currentpos === (int) $record->length
-            ? self::STATE_COMPLETED : self::STATE_STARTED;
-        $record->lastmodified = time();
-        $DB->update_record(self::TABLE, $record);
-        return null;
     }
 
     /**

@@ -16,6 +16,10 @@ All notable changes to `repository_largefile` are documented here.
   or swept by the cleanup task (default 24h). Each has a **Remove** link, with a
   **Remove all completed uploads** button (both confirmed), so an admin can reclaim
   that space directly. Same lock/state-checked deletion.
+- **Concurrency-safe removal.** The foreground chunk-write path now takes the same
+  per-token lock as the background writer and the removal actions, so a removal can
+  never race an upload that is finishing its final chunk and delete a file that just
+  completed.
 
 ## 0.6.4 — 2026-09-07
 
