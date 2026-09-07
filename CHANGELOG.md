@@ -2,6 +2,14 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.5.1 — 2026-09-07
+
+- **Fix: ensure the `receivedmap` upgrade actually runs.** Re-asserts the
+  `receivedmap` column added in 0.5.0 with a fresh version bump and an idempotent
+  upgrade step, so a site that recorded 0.5.0 without the column landing (for
+  example an interrupted upgrade) picks it up on the next upgrade. No behaviour
+  change; a site already carrying the column is unaffected.
+
 ## 0.5.0 — 2026-09-07
 
 - **Background upload that continues after you close the tab (experimental,
