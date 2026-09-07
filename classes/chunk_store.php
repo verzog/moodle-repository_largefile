@@ -684,4 +684,24 @@ class chunk_store {
             $lock->release();
         }
     }
+
+    /**
+     * Remove every in-progress upload site-wide, each through {@see self::delete_if_started()}
+     * so the same lock and state re-check apply — a partial that completed in the
+     * meantime is left alone. For an admin reclaiming disk when stalled uploads have
+     * built up in the chunk area.
+     *
+     * @return int How many uploads were actually removed.
+     */
+    public static function delete_all_started(): int {
+        global $DB;
+        $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'state = :state', ['state' => self::STATE_STARTED]);
+        $removed = 0;
+        foreach ($ids as $id) {
+            if (self::delete_if_started((string) $id) === 'removed') {
+                $removed++;
+            }
+        }
+        return $removed;
+    }
 }

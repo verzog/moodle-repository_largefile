@@ -96,6 +96,24 @@ if ($action === 'removeupload') {
     ];
     redirect($baseurl, get_string($messages[$outcome], 'repository_largefile'));
 }
+// Remove every in-progress upload at once, to reclaim disk when stalled uploads have
+// built up. Destructive (it interrupts any upload still genuinely streaming), so it
+// asks for confirmation first.
+if ($action === 'removeallstalled') {
+    require_sesskey();
+    if (optional_param('confirm', 0, PARAM_BOOL)) {
+        $removed = \repository_largefile\chunk_store::delete_all_started();
+        redirect($baseurl, get_string('uploadsremoved', 'repository_largefile', $removed));
+    }
+    echo $OUTPUT->header();
+    echo $OUTPUT->confirm(
+        get_string('confirmremoveallstalled', 'repository_largefile'),
+        new moodle_url($baseurl, ['action' => 'removeallstalled', 'confirm' => 1, 'sesskey' => sesskey()]),
+        $baseurl
+    );
+    echo $OUTPUT->footer();
+    exit;
+}
 
 $peers = peer_manager::menu();
 $form = new transfer_form($baseurl->out(false), ['peers' => $peers]);
@@ -144,6 +162,18 @@ $PAGE->requires->js_call_amd('repository_largefile/transfers_monitor', 'init', [
     'region' => 'largefile-active-uploads',
     'interval' => 5000,
 ]]);
+// Bulk "reclaim disk" action, shown only when there is more than one upload to clear
+// (a single one has its own Remove link). Confirmed before it runs.
+if ($DB->count_records('repository_largefile_chunks', ['state' => \repository_largefile\chunk_store::STATE_STARTED]) > 1) {
+    echo html_writer::div(
+        html_writer::link(
+            new moodle_url($baseurl, ['action' => 'removeallstalled', 'sesskey' => sesskey()]),
+            get_string('removeallstalled', 'repository_largefile'),
+            ['class' => 'btn btn-secondary']
+        ),
+        'mb-3'
+    );
+}
 
 // Queued, running and finished server-side transfers (site-wide).
 $transfers = transfer_manager::list_all();

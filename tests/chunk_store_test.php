@@ -391,4 +391,34 @@ final class chunk_store_test extends \advanced_testcase {
         // An unknown token: nothing to remove.
         $this->assertSame('notstarted', chunk_store::delete_if_started('0000000002'));
     }
+
+    /**
+     * delete_all_started() removes every in-progress upload but leaves a completed
+     * one, and reports how many it removed.
+     *
+     * @return void
+     */
+    public function test_delete_all_started(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $ctx = \context_system::instance()->id;
+
+        // Two in-progress uploads and one completed.
+        $a = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($a), 1000, 'a.mp4');
+        chunk_store::write_range(chunk_store::get_record($a), 0, 400, random_bytes(400));
+        $b = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($b), 1000, 'b.mp4');
+        $done = chunk_store::create_token($ctx, -1);
+        $donerec = chunk_store::get_record($done);
+        $this->assertNull(chunk_store::apply_start($donerec, 0, 300, 300, 'done.bin', random_bytes(300)));
+
+        $this->assertSame(2, chunk_store::delete_all_started());
+        $this->assertNull(chunk_store::get_record($a));
+        $this->assertNull(chunk_store::get_record($b));
+        // The completed upload is untouched.
+        $this->assertNotNull(chunk_store::get_record($done));
+        // Nothing left to remove on a second run.
+        $this->assertSame(0, chunk_store::delete_all_started());
+    }
 }
