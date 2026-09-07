@@ -137,6 +137,9 @@ final class manage_page_test extends \advanced_testcase {
         $this->assertStringContainsString('lecture.mp4', $html);
         $this->assertStringContainsString(get_string('uploadmodebackground', 'repository_largefile'), $html);
         $this->assertStringContainsString('50%', $html);
+        // Each row offers a Remove action targeting that upload's token.
+        $this->assertStringContainsString('action=removeupload', $html);
+        $this->assertStringContainsString('uploadid=' . $id, $html);
     }
 
     /**
