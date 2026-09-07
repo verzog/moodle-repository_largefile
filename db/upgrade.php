@@ -91,5 +91,17 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090508, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090602) {
+        // A Background Fetch upload writes its chunks out of order, so the token
+        // records which byte ranges have arrived.
+        $table = new xmldb_table('repository_largefile_chunks');
+        $field = new xmldb_field('receivedmap', XMLDB_TYPE_TEXT, null, null, null, null, null, 'currentpos');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090602, 'repository', 'largefile');
+    }
+
     return true;
 }

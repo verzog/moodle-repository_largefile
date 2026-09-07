@@ -26,6 +26,13 @@ defined('MOODLE_INTERNAL') || die();
 
 $string['addfile'] = 'Add file';
 $string['addpeer'] = 'Add peer';
+$string['bgstarted'] = 'Your upload is continuing in the background. You can close this page — the file will appear in the '
+    . 'picker when it finishes.';
+$string['bgstarting'] = 'Starting background upload…';
+$string['bgupload'] = 'Keep uploading after I close this page';
+$string['bgupload_help'] = 'Uses your browser\'s background upload (Chrome and Edge). The file keeps uploading even if you '
+    . 'close this tab, and appears in the picker when it finishes — but there is no progress bar here while it runs, as your '
+    . 'browser shows its own. Other browsers upload in the foreground instead (which you can resume if you navigate away).';
 $string['chooselargefile'] = 'Choose a large file';
 $string['cleanup_task'] = 'Clean up stale chunked uploads and expired shares';
 $string['configplugin'] = 'Large file repository settings';

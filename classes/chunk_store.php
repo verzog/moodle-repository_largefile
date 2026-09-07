@@ -191,6 +191,157 @@ class chunk_store {
     }
 
     /**
+     * Initialise a token for an out-of-order (Background Fetch) upload: record the
+     * total length and file name, mark it started, and create the destination file
+     * pre-sized so chunks can be written at any offset. The max-length and
+     * accepted-file-kind policy are enforced here, up front, because a Background
+     * Fetch cannot surface a per-chunk rejection to the user later.
+     *
+     * @param \stdClass $record The token row.
+     * @param int $length Total file length in bytes.
+     * @param string $filename The uploaded file's name.
+     * @return string|null An error message, or null on success.
+     */
+    public static function begin_random($record, int $length, string $filename): ?string {
+        global $CFG, $DB;
+        if ($length <= 0) {
+            return 'Must not be empty!';
+        }
+        if ((int) $record->maxlength !== -1 && $length > (int) $record->maxlength) {
+            return get_string('errorfiletoobig', 'moodle', (int) $record->maxlength);
+        }
+        $reason = local\import_policy::upload_rejection_reason($filename);
+        if ($reason !== null) {
+            return $reason;
+        }
+        $dirpath = self::get_base_folder();
+        if (!file_exists($dirpath)) {
+            mkdir($dirpath, $CFG->directorypermissions, true);
+        }
+        $target = self::get_path_for_id($record->id);
+        // Pre-size the file so out-of-order writes land at their true offset.
+        $handle = @fopen($target, 'c');
+        if ($handle === false) {
+            return 'Failed to create the upload file.';
+        }
+        @ftruncate($handle, $length);
+        @fclose($handle);
+        $record->filename = $filename;
+        $record->length = $length;
+        $record->currentpos = 0;
+        $record->receivedmap = '[]';
+        $record->state = self::STATE_STARTED;
+        $record->lastmodified = time();
+        $DB->update_record(self::TABLE, $record);
+        return null;
+    }
+
+    /**
+     * Write one chunk of an out-of-order upload at its byte offset, recording the
+     * range received and completing the upload once every byte has arrived. Safe to
+     * call for the same range twice (a Background Fetch retry): the range set is
+     * idempotent and the file write is positional. Concurrent chunk writes are
+     * serialised on a short per-token lock while the range set is updated.
+     *
+     * @param \stdClass $record The token row (its length must be set by begin_random()).
+     * @param int $start Offset the chunk begins at.
+     * @param int $end Offset the chunk ends at (exclusive).
+     * @param string $content The chunk bytes; length must equal end minus start.
+     * @return array|string An array {complete, currentpos} on success, or an error string.
+     */
+    public static function write_range($record, int $start, int $end, string $content) {
+        global $DB;
+        $length = (int) $record->length;
+        if ($length <= 0) {
+            return 'This upload was not initialised for Background Fetch.';
+        }
+        if ($start < 0 || $end > $length || $start >= $end) {
+            return 'Chunk range is out of bounds.';
+        }
+        if (strlen($content) !== $end - $start) {
+            return 'Filechunk is not as long as it should be.';
+        }
+        $target = self::get_path_for_id($record->id);
+        $handle = @fopen($target, 'c+');
+        if ($handle === false) {
+            return 'Failed to open the upload file.';
+        }
+        if (@fseek($handle, $start) !== 0) {
+            @fclose($handle);
+            return 'Failed to seek in the upload file.';
+        }
+        $written = @fwrite($handle, $content);
+        @fclose($handle);
+        if ($written !== strlen($content)) {
+            return 'Failed to write chunk to disk.';
+        }
+
+        // Record the received range under a short per-token lock so parallel chunk
+        // writes cannot lose each other's updates to the range set.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            return 'Could not acquire the upload lock.';
+        }
+        try {
+            $fresh = self::get_record($record->id);
+            if (!$fresh) {
+                return 'The upload was cancelled.';
+            }
+            $ranges = self::add_range(json_decode($fresh->receivedmap ?: '[]', true) ?: [], $start, $end);
+            $covered = self::covered_bytes($ranges);
+            $complete = $covered >= $length;
+            $fresh->receivedmap = json_encode($ranges);
+            $fresh->currentpos = min($covered, $length);
+            $fresh->lastmodified = time();
+            if ($complete) {
+                $fresh->state = self::STATE_COMPLETED;
+            }
+            $DB->update_record(self::TABLE, $fresh);
+            return ['complete' => $complete, 'currentpos' => (int) $fresh->currentpos];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Merge a new [start, end) range into a sorted, non-overlapping range list.
+     *
+     * @param array $ranges Existing list of [start, end] pairs.
+     * @param int $start New range start.
+     * @param int $end New range end (exclusive).
+     * @return array The merged list of [start, end] pairs.
+     */
+    private static function add_range(array $ranges, int $start, int $end): array {
+        $ranges[] = [$start, $end];
+        usort($ranges, fn($a, $b) => $a[0] <=> $b[0]);
+        $merged = [];
+        foreach ($ranges as $range) {
+            $last = count($merged) - 1;
+            if ($merged && $range[0] <= $merged[$last][1]) {
+                $merged[$last][1] = max($merged[$last][1], $range[1]);
+            } else {
+                $merged[] = [(int) $range[0], (int) $range[1]];
+            }
+        }
+        return $merged;
+    }
+
+    /**
+     * Total bytes covered by a merged range list.
+     *
+     * @param array $ranges List of [start, end] pairs.
+     * @return int The covered byte count.
+     */
+    private static function covered_bytes(array $ranges): int {
+        $total = 0;
+        foreach ($ranges as $range) {
+            $total += $range[1] - $range[0];
+        }
+        return $total;
+    }
+
+    /**
      * Base folder under dataroot where partial chunk files live.
      *
      * @return string Absolute path ending in a directory separator.

@@ -219,4 +219,80 @@ final class chunk_store_test extends \advanced_testcase {
         $this->assertEquals(chunk_store::STATE_UNUSED, (int) $record->state);
         $this->assertEquals(0, (int) $record->currentpos);
     }
+
+    /**
+     * A Background Fetch upload assembles correctly when its chunks arrive out of
+     * order, marks complete once every byte has landed, and tolerates a re-sent
+     * chunk without double-counting or completing early.
+     *
+     * @return void
+     */
+    public function test_write_range_out_of_order(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($id);
+
+        $data = random_bytes(2500);
+        $this->assertNull(chunk_store::begin_random($record, strlen($data), 'video.mp4'));
+
+        $record = chunk_store::get_record($id);
+        $mid = chunk_store::write_range($record, 1000, 2000, substr($data, 1000, 1000));
+        $this->assertIsArray($mid);
+        $this->assertFalse($mid['complete']);
+
+        $record = chunk_store::get_record($id);
+        $tail = chunk_store::write_range($record, 2000, 2500, substr($data, 2000, 500));
+        $this->assertFalse($tail['complete']);
+
+        // Re-send the middle chunk: it must not double-count or complete early.
+        $record = chunk_store::get_record($id);
+        $dup = chunk_store::write_range($record, 1000, 2000, substr($data, 1000, 1000));
+        $this->assertFalse($dup['complete']);
+        $this->assertEquals(1500, $dup['currentpos']);
+
+        $record = chunk_store::get_record($id);
+        $head = chunk_store::write_range($record, 0, 1000, substr($data, 0, 1000));
+        $this->assertTrue($head['complete']);
+        $this->assertTrue(chunk_store::is_complete($id));
+        $this->assertSame($data, file_get_contents(chunk_store::get_path_for_id($id)));
+    }
+
+    /**
+     * write_range rejects an out-of-bounds range and a body that is the wrong length.
+     *
+     * @return void
+     */
+    public function test_write_range_rejects_bad_input(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($id);
+        chunk_store::begin_random($record, 1000, 'video.mp4');
+
+        $record = chunk_store::get_record($id);
+        $this->assertIsString(chunk_store::write_range($record, 500, 2000, str_repeat('x', 1500)));
+        $record = chunk_store::get_record($id);
+        $this->assertIsString(chunk_store::write_range($record, 0, 100, 'short'));
+        $this->assertFalse(chunk_store::is_complete($id));
+    }
+
+    /**
+     * begin_random enforces the accepted-file-type policy before any bytes arrive.
+     *
+     * @return void
+     */
+    public function test_begin_random_enforces_type_policy(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        set_config('restricttypes', 1, 'largefile');
+        set_config('accept_video', 0, 'largefile');
+
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($id);
+        $this->assertIsString(chunk_store::begin_random($record, 100, 'video.mp4'));
+
+        $record = chunk_store::get_record($id);
+        $this->assertNull(chunk_store::begin_random($record, 100, 'course.mbz'));
+    }
 }

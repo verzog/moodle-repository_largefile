@@ -151,6 +151,39 @@ switch ($action) {
         }
         break;
 
+    case 'bgstart':
+        // Initialise a Background Fetch upload: its chunks arrive out of order (and
+        // possibly after the page has closed), so the total length and file name are
+        // recorded up front and the accepted-type policy is enforced now.
+        $length = optional_param('length', 0, PARAM_INT);
+        $filename = clean_param(optional_param('filename', '', PARAM_FILE), PARAM_FILE);
+        $error = chunk_store::begin_random($record, $length, $filename);
+        if ($error !== null) {
+            $senderror($error);
+        }
+        echo json_encode((object) ['ok' => true]);
+        die;
+
+    case 'bgchunk':
+        // One chunk of a Background Fetch upload, written at its own byte offset.
+        $start = optional_param('start', null, PARAM_INT);
+        $end = optional_param('end', null, PARAM_INT);
+        if ($start === null || $end === null) {
+            http_response_code(400);
+            $senderror('Param start or end is missing');
+        }
+        $content = file_get_contents('php://input', false, null, 0, $end - $start);
+        $result = chunk_store::write_range($record, $start, $end, (string) $content);
+        if (is_string($result)) {
+            // Background Fetch judges a request by its HTTP status, not the JSON body,
+            // so a failed chunk must return a non-2xx status — otherwise the browser
+            // would count it as delivered and could fire success on an incomplete upload.
+            http_response_code(400);
+            $senderror($result);
+        }
+        echo json_encode((object) $result);
+        die;
+
     case 'status':
         $progress = chunk_store::get_progress($id);
         echo json_encode((object) ($progress ?? ['error' => get_string('tokenexpired', 'repository_largefile')]));
