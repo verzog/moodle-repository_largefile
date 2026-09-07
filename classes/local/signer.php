@@ -25,7 +25,7 @@
  * Replay is prevented by a short timestamp window plus a one-shot nonce.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -35,7 +35,7 @@ namespace repository_largefile\local;
  * HMAC signing of share requests between paired sites.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class signer {
@@ -65,8 +65,9 @@ class signer {
     /**
      * Verify a signed request: signature, freshness and single use.
      *
-     * The signature is checked before the nonce is recorded, so an unauthenticated
-     * caller cannot fill the nonce table.
+     * The signature is checked first: an unauthenticated caller then learns nothing
+     * from the freshness check (a "stale" verdict would otherwise confirm that a
+     * guessed token exists) and cannot fill the nonce table.
      *
      * @param array $params The received request parameters (including ts/nonce/sig).
      * @param string $secret The pairing secret.
@@ -78,12 +79,12 @@ class signer {
                 return 'errorsharesig';
             }
         }
-        if (abs(time() - (int) $params['ts']) > self::TIME_WINDOW) {
-            return 'errorsharestale';
-        }
         $expected = self::compute($params, $secret);
         if (!hash_equals($expected, (string) $params['sig'])) {
             return 'errorsharesig';
+        }
+        if (abs(time() - (int) $params['ts']) > self::TIME_WINDOW) {
+            return 'errorsharestale';
         }
         if (!self::claim_nonce((string) $params['nonce'])) {
             return 'errorsharereplay';
@@ -130,13 +131,18 @@ class signer {
     }
 
     /**
-     * How long a nonce must be retained (the validity window) before the cleanup
-     * task may drop it. After this, an old nonce can never pass the timestamp
-     * check, so re-use is already impossible.
+     * How long a nonce must be retained before the cleanup task may drop it.
+     *
+     * A nonce is recorded at the time the request is *received*, but its timestamp
+     * may sit anywhere within the window either side of that — a request stamped at
+     * the far future edge stays fresh for two full windows after receipt. The nonce
+     * must outlive that whole span (plus a margin for clock drift between web and
+     * cron hosts), or a captured request could be replayed once the nonce was
+     * purged while its timestamp was still fresh.
      *
      * @return int Seconds.
      */
     public static function nonce_retention(): int {
-        return self::TIME_WINDOW;
+        return 2 * self::TIME_WINDOW + 60;
     }
 }

@@ -2,6 +2,37 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.6 — 2026-09-07
+
+Stability and security review fixes. No schema change.
+
+- **Fix: privacy (GDPR) requests failed on PostgreSQL.** Working out which
+  contexts hold a user's data threw *operator does not exist: bigint = text* on a
+  PostgreSQL site for any user who had ever published a share or queued a transfer,
+  so a data export or erasure for such a user crashed. The system context is now
+  selected from the context table instead of being emitted as a bound parameter.
+  Adds privacy provider tests (discovery, export, erasure) that run on every
+  supported database in CI.
+- **Fix: URL and peer-share imports were silently capped at 2 GB.** When the site
+  or user upload limit was "unlimited" the fetcher fell back to a fixed 2 GB
+  ceiling, so a larger backup import failed with *too big*. An unlimited fetch is
+  now bounded by the free space on the disk it lands on (less a 1 GiB reserve) —
+  the resource the cap exists to protect — so a multi-gigabyte import works while
+  a runaway download still cannot fill the disk.
+- **Security: close a replay window in share request signing.** Spent nonces were
+  kept only for the freshness window, but a request stamped at the future edge of
+  that window stays fresh for twice as long — so a captured signed request could
+  in principle be replayed after its nonce was purged. Nonces are now retained for
+  two windows plus a margin.
+- **Security: the share endpoint no longer confirms a token exists.** The
+  signature is verified before the timestamp, so an unauthenticated caller can no
+  longer distinguish "no such share" from "valid share, stale request".
+- **Hardening: malformed peer metadata fails cleanly.** The receiving site now
+  checks a peer's share metadata (salt, SHA-256, file name) is well-formed before
+  deriving a key, instead of hitting a type error.
+- Copyright headers standardised to *2026 Vernon Spain* (the derived
+  `local_chunkupload` notices are kept); README licence section expanded.
+
 ## 0.6.5 — 2026-09-07
 
 - **Remove all stalled uploads in one click.** When more than one upload is in

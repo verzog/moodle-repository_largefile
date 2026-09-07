@@ -22,7 +22,7 @@ use repository_largefile\chunk_store;
  * Tests for the running-progress readout.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\manage_page
  */

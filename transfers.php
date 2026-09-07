@@ -18,7 +18,7 @@
  * Queue a server-side transfer and watch every transfer and upload on the site.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 

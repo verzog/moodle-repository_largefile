@@ -22,7 +22,7 @@
  * share URL — it only ever authenticates a request via HMAC ({@see signer}).
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -32,7 +32,7 @@ namespace repository_largefile\local;
  * CRUD for trusted peer sites and their pairing secrets.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class peer_manager {

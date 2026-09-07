@@ -29,7 +29,7 @@
  * chunks arrive out of order and the server reassembles them.
  *
  * @module     repository_largefile/upload
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @copyright  2020 Justus Dieckmann WWU
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */

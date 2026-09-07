@@ -231,5 +231,13 @@ After editing `amd/src/upload.js`, rebuild `amd/build/` with `grunt amd`.
 
 ## Licence
 
-GPL-3.0-or-later. The chunked-upload logic derives from `local_chunkupload`
-(2020 Justus Dieckmann WWU).
+Copyright © 2026 Vernon Spain.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (GNU GPL v3 or later — see <https://www.gnu.org/licenses/>).
+
+The chunked-upload logic (`classes/chunk_store.php`, `amd/src/upload.js`) derives
+from `local_chunkupload`, copyright 2020 Justus Dieckmann WWU, also GPL v3 or
+later; those files carry both copyright notices.
