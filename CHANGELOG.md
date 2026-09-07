@@ -2,6 +2,18 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.2 — 2026-09-07
+
+- **The Transfers monitor now refreshes the "uploads in progress" table live.**
+  That region reloads itself every few seconds (a small admin-only, read-only
+  AJAX poll of `transfers.php`), so a chunked upload — including a Background Fetch
+  upload still streaming in after its owner closed the tab — shows its progress
+  climbing without the admin reloading the page or disturbing the "queue a new
+  transfer" form. Polling pauses while the browser tab is hidden and a transient
+  failure is ignored until the next tick. No schema change. (New AMD module
+  `repository_largefile/transfers_monitor`; the table rendering is shared between
+  the page and the poll endpoint via `manage_page::active_uploads_html()`.)
+
 ## 0.6.1 — 2026-09-07
 
 - **Show background uploads distinctly on the Transfers monitor.** The
