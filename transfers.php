@@ -79,6 +79,17 @@ if ($action === 'remove' && $id) {
     }
     redirect($baseurl, get_string('transferremoved', 'repository_largefile'));
 }
+// Remove a stalled in-progress chunked upload on demand (row + partial file), so an
+// admin need not wait for the cleanup task's retention window. Gated by the import
+// capability required above; the token id is a chunk_store id (a numeric string).
+if ($action === 'removeupload') {
+    require_sesskey();
+    $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    if ($uploadid !== '') {
+        \repository_largefile\chunk_store::delete($uploadid);
+    }
+    redirect($baseurl, get_string('uploadremoved', 'repository_largefile'));
+}
 
 $peers = peer_manager::menu();
 $form = new transfer_form($baseurl->out(false), ['peers' => $peers]);

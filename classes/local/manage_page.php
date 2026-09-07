@@ -130,7 +130,9 @@ class manage_page {
             get_string('uploadmode', 'repository_largefile'),
             get_string('transferprogress', 'repository_largefile'),
             get_string('uploadlastactivity', 'repository_largefile'),
+            get_string('actions'),
         ];
+        $baseurl = new \moodle_url('/repository/largefile/transfers.php');
         foreach ($active as $row) {
             $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
             $length = (int) $row->length;
@@ -143,12 +145,20 @@ class manage_page {
             $modekey = \repository_largefile\chunk_store::is_background($row)
                 ? 'uploadmodebackground'
                 : 'uploadmodeforeground';
+            // Remove a stalled upload on demand: an experimental background upload can
+            // stall a chunk short and sit here until the cleanup task's retention
+            // window elapses; this deletes the row and its partial file straight away.
+            $remove = \html_writer::link(
+                new \moodle_url($baseurl, ['action' => 'removeupload', 'uploadid' => $row->id, 'sesskey' => sesskey()]),
+                get_string('remove')
+            );
             $table->data[] = [
                 $user ? fullname($user) : '—',
                 format_string((string) $row->filename),
                 get_string($modekey, 'repository_largefile'),
                 $pct,
                 userdate((int) $row->lastmodified),
+                $remove,
             ];
         }
         return \html_writer::table($table);

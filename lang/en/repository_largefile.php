@@ -261,6 +261,7 @@ $string['uploadmode'] = 'Mode';
 $string['uploadmodebackground'] = 'Background (continues after the tab is closed)';
 $string['uploadmodeforeground'] = 'In-page (only while the tab is open)';
 $string['uploadnotfinished'] = 'The upload did not finish.';
+$string['uploadremoved'] = 'Upload removed.';
 $string['uploadsinprogress'] = 'Uploads in progress';
 $string['url'] = 'File URL';
 $string['url_help'] = 'Paste a direct http(s) download link (for example a signed S3 link). The site fetches it on the '

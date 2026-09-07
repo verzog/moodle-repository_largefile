@@ -2,6 +2,14 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.4 — 2026-09-07
+
+- **Remove a stalled upload on demand.** The *Uploads in progress* table on the
+  Transfers page gains a **Remove** action, so an admin can delete a stuck chunked
+  upload (its row and its partial file) immediately rather than waiting for the
+  cleanup task's retention window to elapse. Gated by the `repository/largefile:import`
+  capability the page already requires, and sesskey-guarded. No schema change.
+
 ## 0.6.3 — 2026-09-07
 
 - **Recover a stalled Background Fetch upload instead of losing it.** The browser
