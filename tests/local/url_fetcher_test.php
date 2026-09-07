@@ -76,4 +76,21 @@ final class url_fetcher_test extends \basic_testcase {
 
         $this->assertSame(2147483647, url_fetcher::unlimited_ceiling('/nonexistent/' . uniqid()));
     }
+
+    /**
+     * The live disk check trips only when free space is known and below the reserve:
+     * a filesystem with room reports false, and an unmeasurable directory reports
+     * false too (that fetch is bounded by the fixed fallback ceiling instead).
+     *
+     * @return void
+     */
+    public function test_disk_below_reserve(): void {
+        $free = disk_free_space(sys_get_temp_dir());
+        if ($free !== false && $free >= 1073741824) {
+            $this->assertFalse(url_fetcher::disk_below_reserve(sys_get_temp_dir()));
+        } else if ($free !== false) {
+            $this->assertTrue(url_fetcher::disk_below_reserve(sys_get_temp_dir()));
+        }
+        $this->assertFalse(url_fetcher::disk_below_reserve('/nonexistent/' . uniqid()));
+    }
 }

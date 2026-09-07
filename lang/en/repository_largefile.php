@@ -56,6 +56,7 @@ $string['errorbadurl'] = 'That does not look like a valid http(s) download URL.'
 $string['errorchunktoolarge'] = 'The server rejected an upload chunk as too large. Ask an administrator to lower the '
     . '"Chunk size (MB)" setting, then upload the file again.';
 $string['errordestnotallowed'] = 'A {$a} file cannot be sent to the chosen destination on this site.';
+$string['errordownloaddiskfull'] = 'The download was stopped because the server is running out of disk space.';
 $string['errordownloadempty'] = 'The URL returned an empty response.';
 $string['errordownloadfailed'] = 'The file could not be downloaded from that URL.';
 $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that URL.';
