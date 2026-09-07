@@ -98,6 +98,38 @@ final class chunk_store_test extends \advanced_testcase {
     }
 
     /**
+     * is_background() tells a Background Fetch upload (out-of-order, survives a
+     * closed tab) from an in-page sequential upload, so the Transfers monitor can
+     * label each. Only the background path sets the received-range map.
+     *
+     * @return void
+     */
+    public function test_is_background_distinguishes_upload_mode(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        // A fresh, unused token has no received map: not (yet) a background upload.
+        $freshid = chunk_store::create_token(\context_system::instance()->id, -1);
+        $this->assertFalse(chunk_store::is_background(chunk_store::get_record($freshid)));
+
+        // An in-page (sequential) upload never sets the received map.
+        $fgdata = random_bytes(2000);
+        $fgid = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::apply_start(chunk_store::get_record($fgid), 0, 1000, strlen($fgdata), 'fg.bin', substr($fgdata, 0, 1000));
+        $this->assertFalse(chunk_store::is_background(chunk_store::get_record($fgid)));
+
+        // A Background Fetch upload is initialised with a received map.
+        $bgid = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::begin_random(chunk_store::get_record($bgid), 2000, 'bg.mp4');
+        $this->assertTrue(chunk_store::is_background(chunk_store::get_record($bgid)));
+
+        // It stays identifiable as background once a chunk has landed.
+        $bgdata = random_bytes(2000);
+        chunk_store::write_range(chunk_store::get_record($bgid), 1000, 2000, substr($bgdata, 1000, 1000));
+        $this->assertTrue(chunk_store::is_background(chunk_store::get_record($bgid)));
+    }
+
+    /**
      * A single chunk that spans the whole file completes it immediately.
      *
      * @return void
