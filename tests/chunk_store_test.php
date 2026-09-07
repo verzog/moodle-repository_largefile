@@ -327,4 +327,38 @@ final class chunk_store_test extends \advanced_testcase {
         $record = chunk_store::get_record($id);
         $this->assertNull(chunk_store::begin_random($record, 100, 'course.mbz'));
     }
+
+    /**
+     * missing_ranges() reports the gaps not yet received, so a stalled Background
+     * Fetch upload can be finished by re-uploading exactly those ranges — and once
+     * they are filled the upload completes.
+     *
+     * @return void
+     */
+    public function test_missing_ranges(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::begin_random(chunk_store::get_record($id), 1000, 'video.mp4');
+
+        // Nothing received yet: the whole file is missing.
+        $this->assertSame([[0, 1000]], chunk_store::missing_ranges($id));
+
+        // Receive the middle only: a gap remains before and after it.
+        chunk_store::write_range(chunk_store::get_record($id), 400, 600, random_bytes(200));
+        $this->assertSame([[0, 400], [600, 1000]], chunk_store::missing_ranges($id));
+
+        // Fill the head; one tail gap remains and the upload is not complete.
+        chunk_store::write_range(chunk_store::get_record($id), 0, 400, random_bytes(400));
+        $this->assertSame([[600, 1000]], chunk_store::missing_ranges($id));
+        $this->assertFalse(chunk_store::is_complete($id));
+
+        // Fill the tail: nothing missing, and the upload is now complete.
+        chunk_store::write_range(chunk_store::get_record($id), 600, 1000, random_bytes(400));
+        $this->assertSame([], chunk_store::missing_ranges($id));
+        $this->assertTrue(chunk_store::is_complete($id));
+
+        // An unknown token reports null (not an empty gap list).
+        $this->assertNull(chunk_store::missing_ranges('0000000001'));
+    }
 }

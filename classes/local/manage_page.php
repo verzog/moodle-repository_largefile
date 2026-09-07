@@ -134,7 +134,10 @@ class manage_page {
         foreach ($active as $row) {
             $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
             $length = (int) $row->length;
-            $pct = $length > 0 ? round((int) $row->currentpos * 100 / $length) . '%' : '—';
+            // Floor, never round: a not-yet-complete upload must not read "100%".
+            // A completed upload leaves this table, so 100% here would be a lie —
+            // an out-of-order upload one chunk short would otherwise round up to it.
+            $pct = $length > 0 ? (int) floor((int) $row->currentpos * 100 / $length) . '%' : '—';
             // A Background Fetch upload keeps streaming even after its tab is closed;
             // an in-page upload only progresses while its browser tab is open.
             $modekey = \repository_largefile\chunk_store::is_background($row)

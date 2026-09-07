@@ -462,6 +462,74 @@ const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, 
 };
 
 /**
+ * Finish a stalled Background Fetch upload from the foreground. The server is asked
+ * which byte ranges are still missing, and only those are re-uploaded — out of
+ * order, at their own offsets, through the same positional write the background
+ * path uses — so the whole file is never re-sent. The upload completes on the
+ * server once the last missing byte lands. A chunk retries transient failures with
+ * the same backoff as a fresh upload; a 4xx or explicit error is terminal.
+ *
+ * @param {File} file The file being resumed (must be the same one).
+ * @param {string} token The upload token id.
+ * @param {number} chunkSize The chunk size in bytes.
+ * @param {function} onProgress Callback given (bytesConfirmed, total).
+ * @param {object} controller The {cancelled, xhr} abort controller.
+ * @return {Promise} Resolves true on success, false if cancelled, or rejects with a message.
+ */
+const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, controller) => {
+    const statusResult = await postRequest({action: 'bgstatus', id: token}, null, null, null, controller);
+    if (controller.cancelled) {
+        return false;
+    }
+    const snap = parseJson(statusResult.text);
+    if (statusResult.status !== 200 || snap === null || snap.error !== undefined || !Array.isArray(snap.missing)) {
+        throw new Error(snap && snap.error ? snap.error : await getString('erroruploadfailed', 'repository_largefile'));
+    }
+    const missingBytes = snap.missing.reduce((sum, range) => sum + (range[1] - range[0]), 0);
+    let confirmed = Math.max(0, file.size - missingBytes);
+    onProgress(confirmed, file.size);
+    for (let g = 0; g < snap.missing.length; g++) {
+        const gapStart = snap.missing[g][0];
+        const gapEnd = snap.missing[g][1];
+        for (let start = gapStart; start < gapEnd; start += chunkSize) {
+            const end = Math.min(start + chunkSize, gapEnd);
+            let retries = 0;
+            for (;;) {
+                if (controller.cancelled) {
+                    return false;
+                }
+                const slice = file.slice(start, end);
+                const base = confirmed;
+                const result = await postRequest({action: 'bgchunk', id: token, start: start, end: end},
+                    slice, 'application/octet-stream', (loaded) => onProgress(base + loaded, file.size), controller);
+                if (controller.cancelled) {
+                    return false;
+                }
+                if (result.status === 200) {
+                    const response = parseJson(result.text);
+                    if (response !== null && response.error !== undefined) {
+                        throw new Error(response.error);
+                    }
+                    confirmed += end - start;
+                    onProgress(confirmed, file.size);
+                    break;
+                }
+                if (isTerminal(result.status)) {
+                    const key = result.status === 413 ? 'errorchunktoolarge' : 'erroruploadfailed';
+                    throw new Error(await getString(key, 'repository_largefile'));
+                }
+                if (retries >= MAX_RETRIES) {
+                    throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+                }
+                retries++;
+                await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, retries - 1), BACKOFF_CAP_MS));
+            }
+        }
+    }
+    return true;
+};
+
+/**
  * Fetch a remote URL server-side into the token. The URL is sent in the POST body
  * so a signed link's credentials are not exposed in request logs.
  *
@@ -620,6 +688,9 @@ const openUploadModal = async(data) => {
             chunksize: rec.chunksize,
             currentpos: currentpos,
             fingerprint: rec.fingerprint,
+            // A stalled Background Fetch upload is finished by its missing ranges,
+            // not by a sequential offset, so the resume path branches on this.
+            background: rec.background === true,
         };
         const percent = rec.size > 0 ? Math.round(currentpos * 100 / rec.size) : 0;
         showResume(await getString('resumeprompt', 'repository_largefile',
@@ -742,7 +813,19 @@ const openUploadModal = async(data) => {
                     bgCompletionCallbacks.push(data.callback);
                     backgroundHandedOff = true;
                     controller.token = null;
-                    writeResume(data.contextId, null);
+                    // Remember it as a background upload so that, if it stalls (the
+                    // browser fails the whole fetch when any one chunk fails), the
+                    // owner can re-select the same file and finish the missing ranges
+                    // rather than starting over. Cleared automatically once the server
+                    // reports it complete (see maybeOfferResume).
+                    writeResume(data.contextId, {
+                        token: bgtoken.id,
+                        filename: selectedFile.name,
+                        size: selectedFile.size,
+                        chunksize: bgtoken.chunksize,
+                        fingerprint: await fingerprintFile(selectedFile),
+                        background: true,
+                    });
                     modal.hide();
                     const notice = await Promise.all([
                         getString('pluginname', 'repository_largefile'),
@@ -752,6 +835,9 @@ const openUploadModal = async(data) => {
                     Notification.alert(notice[0], notice[1], notice[2]);
                     return;
                 }
+                // A stalled Background Fetch upload is finished by its missing ranges,
+                // not by a sequential offset, so it takes a different resume path.
+                const backgroundResume = resuming && pendingResume.background === true;
                 if (resuming) {
                     // Carry on with the existing server-side token from where it stopped.
                     tokenId = pendingResume.token;
@@ -769,6 +855,8 @@ const openUploadModal = async(data) => {
                 // Remember this upload so it can be resumed if the page is left before
                 // it finishes (the server keeps the partial file and its position); the
                 // fingerprint lets a resume confirm the re-selected file is the same one.
+                // A background resume keeps the background flag so a further interruption
+                // still finishes by missing ranges rather than a sequential offset.
                 const fingerprint = resuming ? pendingResume.fingerprint : await fingerprintFile(selectedFile);
                 writeResume(data.contextId, {
                     token: tokenId,
@@ -776,10 +864,13 @@ const openUploadModal = async(data) => {
                     size: selectedFile.size,
                     chunksize: chunkSize,
                     fingerprint: fingerprint,
+                    background: backgroundResume,
                 });
                 hideResume();
                 setStatus(await getString('uploading', 'repository_largefile'));
-                staged = await uploadFileChunked(selectedFile, tokenId, chunkSize, setProgress, controller, resumeFrom);
+                staged = backgroundResume
+                    ? await resumeBackgroundUpload(selectedFile, tokenId, chunkSize, setProgress, controller)
+                    : await uploadFileChunked(selectedFile, tokenId, chunkSize, setProgress, controller, resumeFrom);
             }
             // A cancelled transfer returns false: leave the picker untouched.
             if (controller.cancelled || staged === false) {

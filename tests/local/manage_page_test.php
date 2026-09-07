@@ -138,4 +138,24 @@ final class manage_page_test extends \advanced_testcase {
         $this->assertStringContainsString(get_string('uploadmodebackground', 'repository_largefile'), $html);
         $this->assertStringContainsString('50%', $html);
     }
+
+    /**
+     * An upload one chunk short is floored, never rounded up: it must read short of
+     * 100% (a completed upload leaves this table, so "100%" here would be a lie).
+     *
+     * @return void
+     */
+    public function test_active_uploads_html_floors_progress(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        // 9990 of 10000 bytes received = 99.9%.
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::begin_random(chunk_store::get_record($id), 10000, 'nearly.mp4');
+        chunk_store::write_range(chunk_store::get_record($id), 0, 9990, random_bytes(9990));
+
+        $html = manage_page::active_uploads_html();
+        $this->assertStringContainsString('99%', $html);
+        $this->assertStringNotContainsString('100%', $html);
+    }
 }

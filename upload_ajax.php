@@ -22,6 +22,9 @@
  *  - start:    write the first chunk of a new upload.
  *  - proceed:  append a subsequent chunk.
  *  - status:   report how many bytes the server has stored (for resume).
+ *  - bgstart:  initialise an out-of-order (Background Fetch) upload.
+ *  - bgchunk:  write one chunk of a Background Fetch upload at its byte offset.
+ *  - bgstatus: report progress plus the byte ranges still missing (for resume).
  *  - delete:   discard a partial upload.
  *  - fetchurl: fetch a remote URL server-side into the token (URL import).
  *
@@ -187,6 +190,18 @@ switch ($action) {
     case 'status':
         $progress = chunk_store::get_progress($id);
         echo json_encode((object) ($progress ?? ['error' => get_string('tokenexpired', 'repository_largefile')]));
+        die;
+
+    case 'bgstatus':
+        // Progress plus the byte ranges still missing, so the client can finish a
+        // stalled Background Fetch upload by re-uploading exactly those ranges.
+        $progress = chunk_store::get_progress($id);
+        if ($progress === null) {
+            echo json_encode((object) ['error' => get_string('tokenexpired', 'repository_largefile')]);
+            die;
+        }
+        $progress['missing'] = chunk_store::missing_ranges($id);
+        echo json_encode((object) $progress);
         die;
 
     case 'delete':
