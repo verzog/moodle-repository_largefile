@@ -51,6 +51,8 @@ if ($peers) {
         // Empty means "auto": the policy routes to the file kind's default enabled
         // destination (a peer share defaults to the private backup area).
         $destination = $data->destination ?? '';
+        // Target course for the course backup area destination (0 otherwise).
+        $targetcourseid = (int) ($data->courseid ?? 0);
         if (!empty($data->background)) {
             // Run the import on the server, immune to the web request timeout that
             // a large backup would otherwise hit. It is picked up by the scheduled
@@ -58,7 +60,12 @@ if ($peers) {
             transfer_manager::create(
                 transfer_manager::TYPE_SHARE,
                 (int) $USER->id,
-                ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl, 'destination' => $destination],
+                [
+                    'peerid' => (int) $data->peerid,
+                    'shareurl' => $data->shareurl,
+                    'destination' => $destination,
+                    'targetcourseid' => $targetcourseid,
+                ],
                 0
             );
             redirect(
@@ -78,7 +85,8 @@ if ($peers) {
                 $result['path'],
                 $result['filename'],
                 $destination,
-                $context->id
+                $context->id,
+                $targetcourseid
             );
             $peer = peer_manager::get((int) $data->peerid);
             backup_imported::build((int) $USER->id, $peer ? $peer->name : '', $filename)->trigger();

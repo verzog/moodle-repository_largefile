@@ -83,21 +83,128 @@ final class import_policy_test extends \advanced_testcase {
      */
     public function test_destinations_for_kind(): void {
         $this->resetAfterTest(true);
-        // All destinations enabled by default.
+        // All destinations enabled by default. A backup suits the private and course
+        // backup areas and private files; video suits the picker and private files.
         $this->assertSame(
-            [import_policy::DEST_BACKUPAREA, import_policy::DEST_PRIVATEFILES],
+            [import_policy::DEST_BACKUPAREA, import_policy::DEST_COURSEBACKUP, import_policy::DEST_PRIVATEFILES],
             import_policy::destinations_for(import_policy::TYPE_BACKUP)
         );
         $this->assertSame(
             [import_policy::DEST_PICKER, import_policy::DEST_PRIVATEFILES],
             import_policy::destinations_for(import_policy::TYPE_VIDEO)
         );
+        // The course backup area needs a chosen course, so it is never the auto route.
         $this->assertSame(import_policy::DEST_BACKUPAREA, import_policy::default_destination(import_policy::TYPE_BACKUP));
 
-        // Disable the backup area: a backup then defaults to private files.
+        // Disable the backup area: a backup then defaults to private files (still not
+        // the course backup area, which is always an explicit choice).
         set_config('dest_backuparea', 0, 'largefile');
-        $this->assertSame([import_policy::DEST_PRIVATEFILES], import_policy::destinations_for(import_policy::TYPE_BACKUP));
+        $this->assertSame(
+            [import_policy::DEST_COURSEBACKUP, import_policy::DEST_PRIVATEFILES],
+            import_policy::destinations_for(import_policy::TYPE_BACKUP)
+        );
         $this->assertSame(import_policy::DEST_PRIVATEFILES, import_policy::default_destination(import_policy::TYPE_BACKUP));
+
+        // With only the course backup area left, there is no automatic destination.
+        set_config('dest_privatefiles', 0, 'largefile');
+        $this->assertSame([import_policy::DEST_COURSEBACKUP], import_policy::destinations_for(import_policy::TYPE_BACKUP));
+        $this->assertNull(import_policy::default_destination(import_policy::TYPE_BACKUP));
+    }
+
+    /**
+     * The course backup area is offered only for backups, never for other kinds.
+     *
+     * @return void
+     */
+    public function test_course_backup_only_suits_backups(): void {
+        $this->resetAfterTest(true);
+        $this->assertTrue(
+            import_policy::is_destination_allowed(import_policy::TYPE_BACKUP, import_policy::DEST_COURSEBACKUP)
+        );
+        $this->assertFalse(
+            import_policy::is_destination_allowed(import_policy::TYPE_VIDEO, import_policy::DEST_COURSEBACKUP)
+        );
+        $this->assertFalse(
+            import_policy::is_destination_allowed(import_policy::TYPE_SCORM, import_policy::DEST_COURSEBACKUP)
+        );
+    }
+
+    /**
+     * A backup routed to a course's backup area lands in that course's backup/course
+     * file area when the user may upload a backup there.
+     *
+     * @return void
+     */
+    public function test_store_to_course_backup_area(): void {
+        $this->resetAfterTest(true);
+        $course = $this->getDataGenerator()->create_course();
+        $teacher = $this->getDataGenerator()->create_user();
+        // A teacher (editing) holds moodle/restore:uploadfile in the course.
+        $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
+
+        $src = make_request_directory() . '/course.mbz';
+        file_put_contents($src, 'backup-bytes');
+
+        $name = import_policy::store_imported_file(
+            (int) $teacher->id,
+            $src,
+            'course.mbz',
+            import_policy::DEST_COURSEBACKUP,
+            0,
+            (int) $course->id
+        );
+
+        $this->assertSame('course.mbz', $name);
+        $coursecontext = \context_course::instance($course->id);
+        $this->assertTrue(get_file_storage()->file_exists($coursecontext->id, 'backup', 'course', 0, '/', 'course.mbz'));
+    }
+
+    /**
+     * Routing to a course backup area without a chosen course is refused.
+     *
+     * @return void
+     */
+    public function test_store_course_backup_requires_course(): void {
+        $this->resetAfterTest(true);
+        $user = $this->getDataGenerator()->create_user();
+        $src = make_request_directory() . '/course.mbz';
+        file_put_contents($src, 'backup-bytes');
+
+        $this->expectException(\moodle_exception::class);
+        import_policy::store_imported_file(
+            (int) $user->id,
+            $src,
+            'course.mbz',
+            import_policy::DEST_COURSEBACKUP
+        );
+    }
+
+    /**
+     * Routing to a course backup area is refused when the user lacks the capability to
+     * add a backup to that course — the check re-run server-side for background jobs.
+     *
+     * @return void
+     */
+    public function test_store_course_backup_requires_capability(): void {
+        $this->resetAfterTest(true);
+        $course = $this->getDataGenerator()->create_course();
+        // A student is enrolled but does not hold moodle/restore:uploadfile.
+        $student = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($student->id, $course->id, 'student');
+
+        $src = make_request_directory() . '/course.mbz';
+        file_put_contents($src, 'backup-bytes');
+
+        $this->assertFalse(import_policy::can_use_course_backup((int) $student->id, (int) $course->id));
+        $this->expectException(\moodle_exception::class);
+        import_policy::store_imported_file(
+            (int) $student->id,
+            $src,
+            'course.mbz',
+            import_policy::DEST_COURSEBACKUP,
+            0,
+            (int) $course->id
+        );
     }
 
     /**

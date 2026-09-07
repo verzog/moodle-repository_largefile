@@ -76,6 +76,15 @@ class transfer_form extends \moodleform {
             $mform->setDefault('destination', '');
             $mform->addHelpButton('destination', 'importdestination', 'repository_largefile');
         }
+        // The course backup area destination needs a target course; offer a course
+        // selector limited to courses the user may upload a backup into.
+        $coursebackup = \repository_largefile\local\import_policy::DEST_COURSEBACKUP;
+        if (array_key_exists($coursebackup, $destinations)) {
+            $courseopts = ['requiredcapabilities' => ['moodle/restore:uploadfile']];
+            $mform->addElement('course', 'courseid', get_string('importcourse', 'repository_largefile'), $courseopts);
+            $mform->hideIf('courseid', 'destination', 'neq', $coursebackup);
+            $mform->addHelpButton('courseid', 'importcourse', 'repository_largefile');
+        }
 
         $when = [
             'now' => get_string('transferwhennow', 'repository_largefile'),
@@ -108,6 +117,10 @@ class transfer_form extends \moodleform {
             if (empty($data['shareurl'])) {
                 $errors['shareurl'] = get_string('required');
             }
+        }
+        $coursebackup = \repository_largefile\local\import_policy::DEST_COURSEBACKUP;
+        if (($data['destination'] ?? '') === $coursebackup && empty($data['courseid'])) {
+            $errors['courseid'] = get_string('errornocoursechosen', 'repository_largefile');
         }
         if (($data['when'] ?? 'now') === 'at' && (int) ($data['scheduledtime'] ?? 0) < time()) {
             $errors['scheduledtime'] = get_string('transferscheduledpast', 'repository_largefile');

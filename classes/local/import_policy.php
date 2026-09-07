@@ -20,8 +20,9 @@
  * A site can (optionally) restrict which kinds of file this plugin accepts —
  * course backups, SCORM packages, Common Cartridge exports, video — and choose
  * which destinations an imported file may be routed to: the user's private
- * backup area (restorable), the large-file picker (general use), or generic
- * private files. The accepted set which destinations each kind may use, and the
+ * backup area (restorable), a chosen course's backup area (restorable on that
+ * course), the large-file picker (general use), or generic private files. The
+ * accepted set which destinations each kind may use, and the
  * routing itself all live here so the import page, the URL-import queue, the
  * chunked uploader and the unattended runner all enforce one policy.
  *
@@ -72,6 +73,9 @@ class import_policy {
     /** @var string Destination: the user's generic private files (user/private). */
     public const DEST_PRIVATEFILES = 'privatefiles';
 
+    /** @var string Destination: a chosen course's backup area (backup/course), needs a course. */
+    public const DEST_COURSEBACKUP = 'coursebackup';
+
     /**
      * File extensions that identify each restrictable kind.
      *
@@ -93,7 +97,7 @@ class import_policy {
      * @var array Map of kind => ordered list of destination constants.
      */
     private const SUITABLE = [
-        self::TYPE_BACKUP => [self::DEST_BACKUPAREA, self::DEST_PRIVATEFILES],
+        self::TYPE_BACKUP => [self::DEST_BACKUPAREA, self::DEST_COURSEBACKUP, self::DEST_PRIVATEFILES],
         self::TYPE_SCORM => [self::DEST_PICKER, self::DEST_PRIVATEFILES],
         self::TYPE_IMSCC => [self::DEST_PICKER, self::DEST_PRIVATEFILES],
         self::TYPE_VIDEO => [self::DEST_PICKER, self::DEST_PRIVATEFILES],
@@ -164,7 +168,7 @@ class import_policy {
      */
     public static function enabled_destinations(): array {
         $enabled = [];
-        foreach ([self::DEST_BACKUPAREA, self::DEST_PICKER, self::DEST_PRIVATEFILES] as $dest) {
+        foreach ([self::DEST_BACKUPAREA, self::DEST_COURSEBACKUP, self::DEST_PICKER, self::DEST_PRIVATEFILES] as $dest) {
             if (get_config('largefile', 'dest_' . $dest) !== '0') {
                 $enabled[] = $dest;
             }
@@ -205,6 +209,22 @@ class import_policy {
     }
 
     /**
+     * Whether a user may place a backup into a course's backup area — the capability
+     * the restore screen requires to upload a backup file there.
+     *
+     * @param int $userid The user acting.
+     * @param int $courseid The target course id.
+     * @return bool True when the user holds moodle/restore:uploadfile in the course.
+     */
+    public static function can_use_course_backup(int $userid, int $courseid): bool {
+        $context = \context_course::instance($courseid, IGNORE_MISSING);
+        if (!$context) {
+            return false;
+        }
+        return has_capability('moodle/restore:uploadfile', $context, $userid);
+    }
+
+    /**
      * The destinations offered for a given kind: those that suit the kind and are
      * enabled site-wide, in preference order.
      *
@@ -218,14 +238,21 @@ class import_policy {
     }
 
     /**
-     * The default destination for a kind (the first one offered, or null if none).
+     * The default ("automatic") destination for a kind: the first one offered that
+     * needs no further input. The course backup area is skipped here because it
+     * requires the user to pick a target course, so it is only ever an explicit
+     * choice, never the automatic route.
      *
      * @param string $type A TYPE_* constant.
      * @return string|null A DEST_* constant, or null when nothing is offered.
      */
     public static function default_destination(string $type): ?string {
-        $offered = self::destinations_for($type);
-        return $offered[0] ?? null;
+        foreach (self::destinations_for($type) as $dest) {
+            if ($dest !== self::DEST_COURSEBACKUP) {
+                return $dest;
+            }
+        }
+        return null;
     }
 
     /**
@@ -315,16 +342,19 @@ class import_policy {
      * @param string $filename The file name to store under.
      * @param string $destination A DEST_* constant.
      * @param int $contextid Context for a picker-staged file (0 = system context).
+     * @param int $targetcourseid Target course id, required for the course backup area.
      * @return string The final stored file name (may be de-duplicated).
      * @throws \moodle_exception When the kind is rejected, the destination is not
-     *         allowed for it, or storage fails.
+     *         allowed for it, the target course is missing or not permitted, or
+     *         storage fails.
      */
     public static function store_imported_file(
         int $userid,
         string $srcpath,
         string $filename,
         string $destination,
-        int $contextid = 0
+        int $contextid = 0,
+        int $targetcourseid = 0
     ): string {
         $type = self::detect_type($filename);
         if (!self::is_type_accepted($type)) {
@@ -338,6 +368,35 @@ class import_policy {
         }
         if ($destination === null || !self::is_destination_allowed($type, $destination)) {
             throw new \moodle_exception('errordestnotallowed', 'repository_largefile', '', self::type_label($type));
+        }
+
+        if ($destination === self::DEST_COURSEBACKUP) {
+            // Save into the chosen course's backup area, where it appears under
+            // "Course backup area" on that course's restore screen. Gated by the
+            // upload-to-backup-area capability, re-checked here because a background
+            // job runs unattended and must not place a file the user cannot.
+            if ($targetcourseid <= 0) {
+                throw new \moodle_exception('errornocoursechosen', 'repository_largefile');
+            }
+            if (!self::can_use_course_backup($userid, $targetcourseid)) {
+                throw new \moodle_exception('errornocoursebackupcap', 'repository_largefile');
+            }
+            $coursecontext = \context_course::instance($targetcourseid);
+            $fs = get_file_storage();
+            if ($fs->file_exists($coursecontext->id, 'backup', 'course', 0, '/', $filename)) {
+                $filename = time() . '-' . $filename;
+            }
+            $fs->create_file_from_pathname([
+                'contextid' => $coursecontext->id,
+                'component' => 'backup',
+                'filearea' => 'course',
+                'itemid' => 0,
+                'filepath' => '/',
+                'filename' => $filename,
+                'userid' => $userid,
+            ], $srcpath);
+            @unlink($srcpath);
+            return $filename;
         }
 
         if ($destination === self::DEST_PICKER) {

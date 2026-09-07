@@ -39,6 +39,7 @@ $string['configplugin'] = 'Large file repository settings';
 $string['createshare'] = 'Create share';
 $string['deletepeerconfirm'] = 'Delete this peer? Existing shares to it will stop working.';
 $string['destination_backuparea'] = 'Private backup area (restore)';
+$string['destination_coursebackup'] = 'A course\'s backup area (restore)';
 $string['destination_picker'] = 'Large file picker (general use)';
 $string['destination_privatefiles'] = 'Private files';
 $string['destinationauto'] = 'Automatic (based on file type)';
@@ -52,6 +53,8 @@ $string['errordownloadfailed'] = 'The file could not be downloaded from that URL
 $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that URL.';
 $string['errordownloadtoobig'] = 'The file at that URL is larger than the site upload limit.';
 $string['erroremptyfile'] = 'The selected file is empty.';
+$string['errornocoursebackupcap'] = 'You do not have permission to add a backup to that course.';
+$string['errornocoursechosen'] = 'Choose the course whose backup area the file should go to.';
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
@@ -92,6 +95,9 @@ $string['importbackground_help'] = 'Recommended for large backups. The import ru
     . 'browser, so it is not cut off by a web server request timeout (a 504 error). It is queued on the Transfers page and '
     . 'saved to your private backup area when it finishes, ready to restore.';
 $string['importbutton'] = 'Fetch and import';
+$string['importcourse'] = 'Target course';
+$string['importcourse_help'] = 'The course whose backup area the imported backup is stored in. It then appears under '
+    . '"Course backup area" on that course\'s restore screen. Only courses you may add a backup to are listed.';
 $string['importdestination'] = 'Store in';
 $string['importdestination_help'] = 'Where the fetched file is stored. The available choices are narrowed to the '
     . 'file\'s kind once it is fetched: a course backup can go to your private backup area (ready to restore), while a '

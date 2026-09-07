@@ -2,6 +2,20 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.0 — 2026-09-07
+
+- **Import straight into a course's backup area.** The destination chooser gains
+  **"A course's backup area"**: pick a target course and the imported backup lands
+  in that course's backup area, where it appears under *Restore > Course backup
+  area* on that course — one step closer to restore than the per-user backup area.
+  A course selector appears when the destination is chosen, limited to courses you
+  may add a backup to (`moodle/restore:uploadfile`); the capability is re-checked
+  server-side, so a background job can never place a file into a course the user
+  can't. Offered on both the Import page and the URL-import queue, and enabled per
+  site alongside the other destinations. This destination is always an explicit
+  choice (never the "Automatic" default, since it needs a course). No schema
+  change; the chosen course rides the transfer's existing payload.
+
 ## 0.5.1 — 2026-09-07
 
 - **Fix: ensure the `receivedmap` upgrade actually runs.** Re-asserts the

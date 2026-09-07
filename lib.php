@@ -218,7 +218,7 @@ class repository_largefile extends repository {
             // Import policy: opt-in type restriction, the accepted kinds, and the
             // destinations an imported file may be routed to.
             ['restricttypes', 'accept_backup', 'accept_scorm', 'accept_imscc', 'accept_video'],
-            ['dest_backuparea', 'dest_picker', 'dest_privatefiles']
+            ['dest_backuparea', 'dest_coursebackup', 'dest_picker', 'dest_privatefiles']
         );
     }
 
@@ -270,7 +270,7 @@ class repository_largefile extends repository {
             $mform->hideIf('accept_' . $kind, 'restricttypes', 'notchecked');
         }
 
-        foreach (['backuparea', 'picker', 'privatefiles'] as $dest) {
+        foreach (['backuparea', 'coursebackup', 'picker', 'privatefiles'] as $dest) {
             $mform->addElement(
                 'advcheckbox',
                 'dest_' . $dest,

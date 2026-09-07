@@ -68,6 +68,16 @@ class import_form extends \moodleform {
             $mform->setDefault('destination', '');
             $mform->addHelpButton('destination', 'importdestination', 'repository_largefile');
         }
+        // The course backup area destination needs a target course; offer a course
+        // selector limited to courses the user may upload a backup into, shown only
+        // when that destination is chosen.
+        $coursebackup = \repository_largefile\local\import_policy::DEST_COURSEBACKUP;
+        if (array_key_exists($coursebackup, $destinations)) {
+            $courseopts = ['requiredcapabilities' => ['moodle/restore:uploadfile']];
+            $mform->addElement('course', 'courseid', get_string('importcourse', 'repository_largefile'), $courseopts);
+            $mform->hideIf('courseid', 'destination', 'neq', $coursebackup);
+            $mform->addHelpButton('courseid', 'importcourse', 'repository_largefile');
+        }
 
         // Importing a large backup in the foreground can exceed the web server's
         // request timeout (a 504). Running it on the server avoids that.
@@ -76,5 +86,21 @@ class import_form extends \moodleform {
         $mform->addHelpButton('background', 'importbackground', 'repository_largefile');
 
         $this->add_action_buttons(false, get_string('importbutton', 'repository_largefile'));
+    }
+
+    /**
+     * Require a target course when the course backup area destination is chosen.
+     *
+     * @param array $data Submitted data.
+     * @param array $files Submitted files.
+     * @return array Errors keyed by element name.
+     */
+    public function validation($data, $files) {
+        $errors = parent::validation($data, $files);
+        $coursebackup = \repository_largefile\local\import_policy::DEST_COURSEBACKUP;
+        if (($data['destination'] ?? '') === $coursebackup && empty($data['courseid'])) {
+            $errors['courseid'] = get_string('errornocoursechosen', 'repository_largefile');
+        }
+        return $errors;
     }
 }
