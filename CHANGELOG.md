@@ -2,6 +2,19 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.4.1 — 2026-09-07
+
+- **Resume a chunked upload after navigating away.** A large browser upload no
+  longer loses its progress when you leave the page. The server already keeps the
+  partial file; the upload dialogue now also remembers it in your browser, so when
+  you come back and re-select the **same file**, it carries on from where it
+  stopped instead of starting over — a banner offers the resume and shows how far
+  it got. The bytes still only flow while the tab is open (a browser can only read
+  a local file from an open page), so for a genuinely unattended transfer a URL
+  import or the Transfers page is still the way; this just means an accidental
+  navigation, refresh or closed tab no longer wastes a half-finished upload. The
+  resume hint is stored per browser and expires after 24 hours. No schema change.
+
 ## 0.4.0 — 2026-09-06
 
 - **Choose where an imported file goes, and restrict what the site accepts.** An

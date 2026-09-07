@@ -20,7 +20,10 @@
  * chunked upload from the user's computer or a server-side fetch from a URL, and
  * refreshes the picker listing once a file has been staged. The chunk loop
  * retries transient failures with exponential backoff and reconciles its resume
- * position with the server, so a large upload survives a dropped chunk.
+ * position with the server, so a large upload survives a dropped chunk. If the
+ * page is left mid-upload, the server keeps the partial file and this module
+ * remembers it (in localStorage), so re-selecting the same file on return carries
+ * on from where it stopped instead of starting over.
  *
  * @module     repository_largefile/upload
  * @copyright  2026 SCCA
@@ -51,8 +54,100 @@ const BACKOFF_CAP_MS = 16000;
 /** @constant {number} Server-side "upload completed" state (mirrors chunk_store). */
 const STATE_COMPLETED = 2;
 
+/** @constant {string} localStorage key holding per-context resume records. */
+const RESUME_KEY = 'repository_largefile_resume';
+
+/**
+ * @constant {number} Discard a resume record older than this. Kept to one hour to
+ * match the server's default retention of an unfinished upload (the
+ * state1duration setting, default 3600s); the server is the authority — a resume
+ * is only ever offered after the token is confirmed to still exist — so this just
+ * avoids advertising a record whose partial file the cleanup task has removed.
+ */
+const RESUME_TTL_MS = 60 * 60 * 1000;
+
 /** @var {boolean} Whether the pubsub listener has been registered. */
 let listenersRegistered = false;
+
+/**
+ * Read the whole resume map from localStorage, tolerating storage being
+ * unavailable or corrupt (private-browsing, cleared site data, quota).
+ *
+ * @return {object} Map of contextId to a resume record.
+ */
+const readResumeMap = () => {
+    try {
+        return JSON.parse(window.localStorage.getItem(RESUME_KEY) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+};
+
+/**
+ * Store (or, when rec is null, clear) the resume record for a context, pruning
+ * expired entries. Any storage failure is ignored — resume is a convenience.
+ *
+ * @param {number} contextId The context id the upload belongs to.
+ * @param {object|null} rec The record to store, or null to remove it.
+ * @return {void}
+ */
+const writeResume = (contextId, rec) => {
+    try {
+        const map = readResumeMap();
+        const now = Date.now();
+        Object.keys(map).forEach((key) => {
+            if (!map[key] || (now - (map[key].updated || 0)) > RESUME_TTL_MS) {
+                delete map[key];
+            }
+        });
+        if (rec) {
+            map[contextId] = Object.assign({}, rec, {updated: now});
+        } else {
+            delete map[contextId];
+        }
+        window.localStorage.setItem(RESUME_KEY, JSON.stringify(map));
+    } catch (e) {
+        // Storage unavailable; resume-across-navigation simply is not offered.
+    }
+};
+
+/**
+ * The stored resume record for a context, or null when there is none or it has
+ * aged out.
+ *
+ * @param {number} contextId The context id.
+ * @return {object|null} The record, or null.
+ */
+const readResume = (contextId) => {
+    const rec = readResumeMap()[contextId];
+    if (!rec || (Date.now() - (rec.updated || 0)) > RESUME_TTL_MS) {
+        return null;
+    }
+    return rec;
+};
+
+/**
+ * A cheap content fingerprint of a file, so a resume only continues the *same*
+ * file rather than any file that happens to share a name and byte length. It
+ * hashes the first 64 KB (SHA-256 where the secure context provides SubtleCrypto)
+ * and falls back to the last-modified time when it does not.
+ *
+ * @param {File} file The file to fingerprint.
+ * @return {Promise} Resolves with a short opaque string.
+ */
+const fingerprintFile = async(file) => {
+    const head = file.slice(0, Math.min(65536, file.size));
+    if (window.crypto && window.crypto.subtle && window.isSecureContext) {
+        try {
+            const digest = await window.crypto.subtle.digest('SHA-256', await head.arrayBuffer());
+            return 'sha256:' + Array.from(new Uint8Array(digest))
+                .map((b) => b.toString(16).padStart(2, '0')).join('');
+        } catch (e) {
+            // Fall back to a coarser fingerprint below.
+        }
+    }
+    return 'lm:' + (file.lastModified || 0) + ':' + file.size;
+};
 
 /**
  * POST one request to the endpoint. Resolves with the HTTP status and response
@@ -177,12 +272,16 @@ const queryStatus = async(token, controller) => {
  * @param {number} chunkSize The chunk size in bytes.
  * @param {function} onProgress Callback given (bytesConfirmed, total).
  * @param {object} controller The {cancelled, xhr} abort controller.
+ * @param {number} resumeFrom Byte offset already stored server-side (for a resumed upload).
  * @return {Promise} Resolves true on success, false if cancelled, or rejects with a message.
  */
-const uploadFileChunked = async(file, token, chunkSize, onProgress, controller) => {
-    let confirmed = 0;
+const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, resumeFrom = 0) => {
+    let confirmed = resumeFrom;
     let retries = 0;
-    let started = false;
+    // A resumed upload already has its first chunk stored, so every remaining
+    // chunk uses "proceed"; only a fresh upload (offset 0) sends "start".
+    let started = resumeFrom > 0;
+    onProgress(confirmed, file.size);
     while (confirmed < file.size) {
         if (controller.cancelled) {
             return false;
@@ -283,12 +382,30 @@ const openUploadModal = async(data) => {
     const controller = {cancelled: false, xhr: null, token: null};
     let selectedFile = null;
     let busy = false;
+    // An unfinished upload from a previous visit (same browser), offered for resume
+    // once the user re-selects the matching file. resumeActive flips true when the
+    // selected file matches it.
+    let pendingResume = null;
+    let resumeActive = false;
 
     const el = (selector) => root.find(selector).get(0);
     const setStatus = (text) => {
         const status = el('[data-region="status"]');
         if (status) {
             status.textContent = text;
+        }
+    };
+    const showResume = (text) => {
+        const region = el('[data-region="resume"]');
+        if (region) {
+            region.textContent = text;
+            region.hidden = false;
+        }
+    };
+    const hideResume = () => {
+        const region = el('[data-region="resume"]');
+        if (region) {
+            region.hidden = true;
         }
     };
     const setProgress = (loaded, total) => {
@@ -308,19 +425,80 @@ const openUploadModal = async(data) => {
         if (controller.xhr) {
             controller.xhr.abort();
         }
-        if (controller.token) {
-            // Best-effort: drop the token so a server-side fetch still running
-            // discards its download rather than staging it. Pass no controller so
-            // the request is not short-circuited by the cancelled flag.
-            postRequest({action: 'delete', id: controller.token}, null, null, null, null);
+        // Drop the server-side token so a closed dialogue leaves no orphaned partial
+        // file — whether the upload had started (controller.token) or only a resume
+        // was offered and then abandoned (pendingResume). Plain navigation does not
+        // call abort, so an upload left that way stays resumable. Pass no controller
+        // so the request is not short-circuited by the cancelled flag.
+        const droptoken = controller.token || (pendingResume && pendingResume.token);
+        if (droptoken) {
+            postRequest({action: 'delete', id: droptoken}, null, null, null, null);
             controller.token = null;
+            pendingResume = null;
         }
+        writeResume(data.contextId, null);
     };
 
-    // A file on the user's computer is read by this page, so leaving it abandons a
-    // running chunked upload. Warn before navigating away while one is in flight.
-    // (There is no such limit on the server-side scheduled transfers, which is the
-    // supported unattended path — see the Transfers page.)
+    /**
+     * Offer to resume an unfinished upload left in localStorage from a previous
+     * visit. The record is only cleared when the server *definitively* reports the
+     * token gone or finished; a transient status failure (network, 5xx) leaves it
+     * in place so a later open can still resume.
+     *
+     * @return {Promise} Resolves once the banner is shown or dismissed.
+     */
+    const maybeOfferResume = async() => {
+        pendingResume = null;
+        const rec = readResume(data.contextId);
+        if (!rec) {
+            hideResume();
+            return;
+        }
+        const result = await postRequest({action: 'status', id: rec.token}, null, null, null, controller);
+        if (result.status !== 200) {
+            // Transient failure: keep the record, just do not offer it this time.
+            hideResume();
+            return;
+        }
+        const snap = parseJson(result.text);
+        if (snap === null || snap.error !== undefined || snap.currentpos === undefined) {
+            // The server has no such token: it is gone or already finished.
+            writeResume(data.contextId, null);
+            hideResume();
+            return;
+        }
+        // Only trust the stored offset once the server has recorded a length that
+        // matches this record's file; a not-yet-written token (length 0) resumes
+        // from the start, and a non-zero length that differs is a different upload.
+        if (snap.length && snap.length !== rec.size) {
+            writeResume(data.contextId, null);
+            hideResume();
+            return;
+        }
+        const currentpos = snap.length === rec.size ? snap.currentpos : 0;
+        if (snap.state === STATE_COMPLETED || currentpos >= rec.size) {
+            writeResume(data.contextId, null);
+            hideResume();
+            return;
+        }
+        pendingResume = {
+            token: rec.token,
+            filename: rec.filename,
+            size: rec.size,
+            chunksize: rec.chunksize,
+            currentpos: currentpos,
+            fingerprint: rec.fingerprint,
+        };
+        const percent = rec.size > 0 ? Math.round(currentpos * 100 / rec.size) : 0;
+        showResume(await getString('resumeprompt', 'repository_largefile',
+            {filename: rec.filename, percent: percent}));
+    };
+
+    // A file on the user's computer is read by this page, so leaving it pauses a
+    // running chunked upload (the bytes stop flowing). Warn before navigating away
+    // while one is in flight — but the progress is kept, so returning and picking
+    // the same file resumes it. (For a truly unattended transfer, use a URL or the
+    // server-side scheduled transfers on the Transfers page.)
     const beforeUnload = (e) => {
         if (busy) {
             e.preventDefault();
@@ -331,17 +509,32 @@ const openUploadModal = async(data) => {
     };
     window.addEventListener('beforeunload', beforeUnload);
 
-    root.on(ModalEvents.shown, () => {
+    root.on(ModalEvents.shown, async() => {
         selectedFile = null;
+        resumeActive = false;
         busy = false;
         setProgress(0, 1);
         const input = el('[data-region="fileinput"]');
         if (input) {
-            input.addEventListener('change', () => {
+            input.addEventListener('change', async() => {
                 selectedFile = input.files.length ? input.files[0] : null;
-                setStatus(selectedFile ? selectedFile.name : '');
+                resumeActive = false;
+                // Only continue a resume when the re-selected file is genuinely the
+                // same one — same name, size and content fingerprint — so two
+                // different files that share a name and length are never spliced.
+                if (pendingResume && selectedFile
+                        && selectedFile.name === pendingResume.filename
+                        && selectedFile.size === pendingResume.size
+                        && await fingerprintFile(selectedFile) === pendingResume.fingerprint) {
+                    resumeActive = true;
+                    setStatus(await getString('resumeready', 'repository_largefile', selectedFile.name));
+                } else {
+                    hideResume();
+                    setStatus(selectedFile ? selectedFile.name : '');
+                }
             });
         }
+        await maybeOfferResume();
     });
 
     // Cancelling or closing the dialogue aborts any in-flight transfer.
@@ -383,13 +576,40 @@ const openUploadModal = async(data) => {
                     // report a false success, so reject it up front.
                     throw new Error(await getString('erroremptyfile', 'repository_largefile'));
                 }
-                const token = await newToken(data.contextId, controller);
-                controller.token = token.id;
-                if (token.maxbytes > 0 && selectedFile.size > token.maxbytes) {
-                    throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
+                let tokenId;
+                let chunkSize;
+                let resumeFrom = 0;
+                const resuming = resumeActive && pendingResume
+                    && selectedFile.name === pendingResume.filename
+                    && selectedFile.size === pendingResume.size;
+                if (resuming) {
+                    // Carry on with the existing server-side token from where it stopped.
+                    tokenId = pendingResume.token;
+                    chunkSize = pendingResume.chunksize;
+                    resumeFrom = pendingResume.currentpos;
+                } else {
+                    const token = await newToken(data.contextId, controller);
+                    if (token.maxbytes > 0 && selectedFile.size > token.maxbytes) {
+                        throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
+                    }
+                    tokenId = token.id;
+                    chunkSize = token.chunksize;
                 }
+                controller.token = tokenId;
+                // Remember this upload so it can be resumed if the page is left before
+                // it finishes (the server keeps the partial file and its position); the
+                // fingerprint lets a resume confirm the re-selected file is the same one.
+                const fingerprint = resuming ? pendingResume.fingerprint : await fingerprintFile(selectedFile);
+                writeResume(data.contextId, {
+                    token: tokenId,
+                    filename: selectedFile.name,
+                    size: selectedFile.size,
+                    chunksize: chunkSize,
+                    fingerprint: fingerprint,
+                });
+                hideResume();
                 setStatus(await getString('uploading', 'repository_largefile'));
-                staged = await uploadFileChunked(selectedFile, token.id, token.chunksize, setProgress, controller);
+                staged = await uploadFileChunked(selectedFile, tokenId, chunkSize, setProgress, controller, resumeFrom);
             }
             // A cancelled transfer returns false: leave the picker untouched.
             if (controller.cancelled || staged === false) {
@@ -397,19 +617,22 @@ const openUploadModal = async(data) => {
             }
             // The file is staged and about to be listed for selection, so clear the
             // token — otherwise closing the modal would delete it before the user
-            // can pick it.
+            // can pick it — and forget the (now completed) resume record.
             controller.token = null;
+            writeResume(data.contextId, null);
             modal.hide();
             data.callback();
         } catch (error) {
             busy = false;
             setProgress(0, 1);
             // Drop a partially staged token on failure so a retry does not orphan
-            // it (a cancel has already deleted and cleared it via abort()).
+            // it (a cancel has already deleted and cleared it via abort()), and
+            // forget the resume record since the token is gone.
             if (controller.token) {
                 postRequest({action: 'delete', id: controller.token}, null, null, null, null);
                 controller.token = null;
             }
+            writeResume(data.contextId, null);
             if (controller.cancelled) {
                 return;
             }

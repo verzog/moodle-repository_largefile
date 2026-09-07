@@ -150,6 +150,9 @@ $string['privacy:metadata:repository_largefile_transfers:status'] = 'The current
 $string['privacy:metadata:repository_largefile_transfers:timecreated'] = 'The time the transfer was queued.';
 $string['privacy:metadata:repository_largefile_transfers:type'] = 'The kind of transfer (URL or peer-share import).';
 $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user the transfer runs for.';
+$string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
+    . 'file to carry on where you left off, or choose a different file to start over.';
+$string['resumeready'] = 'Ready to resume "{$a}" — the upload will continue from where it stopped.';
 $string['revokeshare'] = 'Revoke';
 $string['revokeshareconfirm'] = 'Revoke this share? The peer will no longer be able to download it.';
 $string['selectuploaded'] = 'Select uploaded file';
