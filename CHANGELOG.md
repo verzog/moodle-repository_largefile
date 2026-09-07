@@ -16,6 +16,17 @@ All notable changes to `repository_largefile` are documented here.
   choice (never the "Automatic" default, since it needs a course). No schema
   change; the chosen course rides the transfer's existing payload.
 
+## 0.5.2 — 2026-09-07
+
+- **Fix: the large-file upload dialogue was broken in every browser.** The AMD
+  module (`amd/build/upload.min.js`) had been rebuilt without default-import
+  interop, so `core/templates`, the modal, and `core/notification` resolved to
+  `undefined` and the dialogue threw `Cannot read properties of undefined
+  (reading 'render')` the moment it opened — no file could be uploaded. Rebuilt
+  with `_interopRequireDefault`/`_interopRequireWildcard` wrapping (matching
+  Moodle's own AMD output), restoring both the chunked upload and the URL-import
+  dialogue. Source unchanged; build artefact only.
+
 ## 0.5.1 — 2026-09-07
 
 - **Fix: ensure the `receivedmap` upgrade actually runs.** Re-asserts the
