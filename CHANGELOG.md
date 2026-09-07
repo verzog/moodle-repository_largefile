@@ -2,6 +2,25 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.5 — 2026-09-07
+
+- **Remove all stalled uploads in one click.** When more than one upload is in
+  progress, the Transfers page shows a **Remove all stalled uploads** button that
+  clears every in-progress upload (rows and partial files) after a confirmation —
+  for reclaiming disk when stalled uploads have built up in the chunk area. Each
+  removal goes through the same lock and state re-check as the per-row Remove, so a
+  partial that has completed in the meantime is left alone. No schema change.
+- **See and clear completed-but-unused uploads.** A **Show completed uploads**
+  toggle on the Transfers page reveals files that finished uploading but were never
+  selected into an activity — they sit in the staging area consuming disk until used
+  or swept by the cleanup task (default 24h). Each has a **Remove** link, with a
+  **Remove all completed uploads** button (both confirmed), so an admin can reclaim
+  that space directly. Same lock/state-checked deletion.
+- **Concurrency-safe removal.** The foreground chunk-write path now takes the same
+  per-token lock as the background writer and the removal actions, so a removal can
+  never race an upload that is finishing its final chunk and delete a file that just
+  completed.
+
 ## 0.6.4 — 2026-09-07
 
 - **Remove a stalled upload on demand.** The *Uploads in progress* table on the

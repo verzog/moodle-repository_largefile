@@ -478,25 +478,42 @@ class chunk_store {
             return 'Filechunk is not as long as it should be.';
         }
 
-        $dirpath = self::get_base_folder();
-        if (!file_exists($dirpath)) {
-            mkdir($dirpath, $CFG->directorypermissions, true);
+        // Write and record under the per-token lock, which a concurrent admin removal
+        // ({@see self::delete_in_state()}) also holds: so a removal cannot see this
+        // upload as still in progress and then delete a file this call is completing,
+        // and — because the row is re-checked here first — a removal that already ran
+        // cannot be raced into recreating an orphaned file for a deleted upload.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            return 'Could not acquire the upload lock.';
         }
-        // Only advance the stored position by the bytes actually persisted, so a
-        // short write (disk full, quota) can never mark the upload further along
-        // than the file really is — which would hand the picker a truncated file.
-        $written = file_put_contents(self::get_path_for_id($record->id), $content);
-        if ($written === false || $written !== strlen($content)) {
-            return 'Failed to write chunk to disk.';
-        }
+        try {
+            if (!self::get_record($record->id)) {
+                return 'The upload was cancelled.';
+            }
+            $dirpath = self::get_base_folder();
+            if (!file_exists($dirpath)) {
+                mkdir($dirpath, $CFG->directorypermissions, true);
+            }
+            // Only advance the stored position by the bytes actually persisted, so a
+            // short write (disk full, quota) can never mark the upload further along
+            // than the file really is — which would hand the picker a truncated file.
+            $written = file_put_contents(self::get_path_for_id($record->id), $content);
+            if ($written === false || $written !== strlen($content)) {
+                return 'Failed to write chunk to disk.';
+            }
 
-        $record->currentpos = $end;
-        $record->length = $length;
-        $record->lastmodified = time();
-        $record->state = $end === $length ? self::STATE_COMPLETED : self::STATE_STARTED;
-        $record->filename = $filename;
-        $DB->update_record(self::TABLE, $record);
-        return null;
+            $record->currentpos = $end;
+            $record->length = $length;
+            $record->lastmodified = time();
+            $record->state = $end === $length ? self::STATE_COMPLETED : self::STATE_STARTED;
+            $record->filename = $filename;
+            $DB->update_record(self::TABLE, $record);
+            return null;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -523,48 +540,65 @@ class chunk_store {
         if (strlen($content) !== $end - $start) {
             return 'Filechunk is not as long as it should be.';
         }
-        $path = self::get_path_for_id($record->id);
-        if ($path === null || !file_exists($path)) {
-            return 'Begin of file does not exist on this server.';
-        }
 
-        $currentpos = (int) $record->currentpos;
-        if ($end > $currentpos) {
-            // Trust the stored position: drop any bytes an interrupted retry left
-            // past it, then write only the portion beyond currentpos.
-            $handle = fopen($path, 'r+b');
-            if ($handle === false) {
+        // Serialise on the per-token lock a concurrent admin removal also holds, so a
+        // removal cannot see this upload in progress and then delete a file this call
+        // is completing. The row is re-checked inside the lock: if a removal already
+        // took it, this returns cleanly instead of writing on into a deleted upload.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            return 'Could not acquire the upload lock.';
+        }
+        try {
+            if (!self::get_record($record->id)) {
+                return 'The upload was cancelled.';
+            }
+            $path = self::get_path_for_id($record->id);
+            if ($path === null || !file_exists($path)) {
                 return 'Begin of file does not exist on this server.';
             }
-            $towrite = substr($content, $currentpos - $start);
-            if (ftruncate($handle, $currentpos) === false || fseek($handle, $currentpos) !== 0) {
+
+            $currentpos = (int) $record->currentpos;
+            if ($end > $currentpos) {
+                // Trust the stored position: drop any bytes an interrupted retry left
+                // past it, then write only the portion beyond currentpos.
+                $handle = fopen($path, 'r+b');
+                if ($handle === false) {
+                    return 'Begin of file does not exist on this server.';
+                }
+                $towrite = substr($content, $currentpos - $start);
+                if (ftruncate($handle, $currentpos) === false || fseek($handle, $currentpos) !== 0) {
+                    fclose($handle);
+                    return 'Could not position the upload file for writing.';
+                }
+                // Advance the stored position only by the bytes fwrite actually
+                // persisted, so a short write (disk full, quota) never marks the
+                // upload further along than the file really is; the client then
+                // resumes from the true position. Persist that position before
+                // reporting the failure so the resume is accurate.
+                $written = fwrite($handle, $towrite);
                 fclose($handle);
-                return 'Could not position the upload file for writing.';
+                if ($written === false) {
+                    return 'Failed to write chunk to disk.';
+                }
+                $record->currentpos = $currentpos + $written;
+                if ($written < strlen($towrite)) {
+                    $record->state = self::STATE_STARTED;
+                    $record->lastmodified = time();
+                    $DB->update_record(self::TABLE, $record);
+                    return 'Failed to write the whole chunk to disk.';
+                }
             }
-            // Advance the stored position only by the bytes fwrite actually
-            // persisted, so a short write (disk full, quota) never marks the
-            // upload further along than the file really is; the client then
-            // resumes from the true position. Persist that position before
-            // reporting the failure so the resume is accurate.
-            $written = fwrite($handle, $towrite);
-            fclose($handle);
-            if ($written === false) {
-                return 'Failed to write chunk to disk.';
-            }
-            $record->currentpos = $currentpos + $written;
-            if ($written < strlen($towrite)) {
-                $record->state = self::STATE_STARTED;
-                $record->lastmodified = time();
-                $DB->update_record(self::TABLE, $record);
-                return 'Failed to write the whole chunk to disk.';
-            }
+            // Otherwise the whole chunk is already stored — accept it as a no-op.
+            $record->state = (int) $record->currentpos === (int) $record->length
+                ? self::STATE_COMPLETED : self::STATE_STARTED;
+            $record->lastmodified = time();
+            $DB->update_record(self::TABLE, $record);
+            return null;
+        } finally {
+            $lock->release();
         }
-        // Otherwise the whole chunk is already stored — accept it as a no-op.
-        $record->state = (int) $record->currentpos === (int) $record->length
-            ? self::STATE_COMPLETED : self::STATE_STARTED;
-        $record->lastmodified = time();
-        $DB->update_record(self::TABLE, $record);
-        return null;
     }
 
     /**
@@ -667,6 +701,24 @@ class chunk_store {
      *         could not be unlinked and the row was kept for the cleanup task).
      */
     public static function delete_if_started(string $id): string {
+        return self::delete_in_state($id, self::STATE_STARTED);
+    }
+
+    /**
+     * Remove an upload on demand — its row and its file — but only while it is in the
+     * expected state, re-checked under the same per-token lock the background writer
+     * uses. Removing an in-progress upload (STATE_STARTED) reclaims a stalled partial;
+     * removing a completed one (STATE_COMPLETED) discards a staged file the owner
+     * uploaded but has not yet selected. The state guard means a stale link cannot
+     * delete an upload that has since moved on, and the true outcome is reported.
+     *
+     * @param string $id The upload token id.
+     * @param int $state The state the row must still be in (a STATE_* constant).
+     * @return string 'removed', 'notstarted' (unknown or no longer in that state —
+     *         nothing removed), or 'failed' (lock unavailable, or the file could not
+     *         be unlinked and the row was kept for the cleanup task).
+     */
+    public static function delete_in_state(string $id, int $state): string {
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($id, 10);
         if (!$lock) {
@@ -674,14 +726,47 @@ class chunk_store {
         }
         try {
             $record = self::get_record($id);
-            if (!$record || (int) $record->state !== self::STATE_STARTED) {
+            if (!$record || (int) $record->state !== $state) {
                 return 'notstarted';
             }
             self::delete($id);
-            // A surviving row means delete() could not unlink the partial file.
+            // A surviving row means delete() could not unlink the file.
             return self::get_record($id) ? 'failed' : 'removed';
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Remove every in-progress upload site-wide, each through {@see self::delete_if_started()}
+     * so the same lock and state re-check apply — a partial that completed in the
+     * meantime is left alone. For an admin reclaiming disk when stalled uploads have
+     * built up in the chunk area.
+     *
+     * @return int How many uploads were actually removed.
+     */
+    public static function delete_all_started(): int {
+        return self::delete_all_in_state(self::STATE_STARTED);
+    }
+
+    /**
+     * Remove every upload site-wide currently in the given state, each through
+     * {@see self::delete_in_state()} so the same lock and state re-check apply. For an
+     * admin reclaiming disk — STATE_STARTED clears stalled partials, STATE_COMPLETED
+     * clears staged files that were uploaded but never selected.
+     *
+     * @param int $state The state to clear (a STATE_* constant).
+     * @return int How many uploads were actually removed.
+     */
+    public static function delete_all_in_state(int $state): int {
+        global $DB;
+        $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'state = :state', ['state' => $state]);
+        $removed = 0;
+        foreach ($ids as $id) {
+            if (self::delete_in_state((string) $id, $state) === 'removed') {
+                $removed++;
+            }
+        }
+        return $removed;
     }
 }

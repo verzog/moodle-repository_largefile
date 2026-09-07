@@ -391,4 +391,72 @@ final class chunk_store_test extends \advanced_testcase {
         // An unknown token: nothing to remove.
         $this->assertSame('notstarted', chunk_store::delete_if_started('0000000002'));
     }
+
+    /**
+     * delete_all_started() removes every in-progress upload but leaves a completed
+     * one, and reports how many it removed.
+     *
+     * @return void
+     */
+    public function test_delete_all_started(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $ctx = \context_system::instance()->id;
+
+        // Two in-progress uploads and one completed.
+        $a = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($a), 1000, 'a.mp4');
+        chunk_store::write_range(chunk_store::get_record($a), 0, 400, random_bytes(400));
+        $b = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($b), 1000, 'b.mp4');
+        $done = chunk_store::create_token($ctx, -1);
+        $donerec = chunk_store::get_record($done);
+        $this->assertNull(chunk_store::apply_start($donerec, 0, 300, 300, 'done.bin', random_bytes(300)));
+
+        $this->assertSame(2, chunk_store::delete_all_started());
+        $this->assertNull(chunk_store::get_record($a));
+        $this->assertNull(chunk_store::get_record($b));
+        // The completed upload is untouched.
+        $this->assertNotNull(chunk_store::get_record($done));
+        // Nothing left to remove on a second run.
+        $this->assertSame(0, chunk_store::delete_all_started());
+    }
+
+    /**
+     * delete_in_state() and delete_all_in_state() also clear completed uploads (staged
+     * files never selected), and the state guard stops one path deleting the other's
+     * uploads.
+     *
+     * @return void
+     */
+    public function test_delete_completed_uploads(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $ctx = \context_system::instance()->id;
+
+        // A completed staged upload.
+        $done = chunk_store::create_token($ctx, -1);
+        $donerec = chunk_store::get_record($done);
+        $this->assertNull(chunk_store::apply_start($donerec, 0, 300, 300, 'done.bin', random_bytes(300)));
+        $this->assertTrue(chunk_store::is_complete($done));
+
+        // The "stalled" path refuses it (wrong state), the completed path removes it.
+        $this->assertSame('notstarted', chunk_store::delete_in_state($done, chunk_store::STATE_STARTED));
+        $this->assertNotNull(chunk_store::get_record($done));
+        $this->assertSame('removed', chunk_store::delete_in_state($done, chunk_store::STATE_COMPLETED));
+        $this->assertNull(chunk_store::get_record($done));
+
+        // Bulk clear of completed uploads leaves an in-progress one alone.
+        $c1 = chunk_store::create_token($ctx, -1);
+        $this->assertNull(chunk_store::apply_start(chunk_store::get_record($c1), 0, 100, 100, 'c1.bin', random_bytes(100)));
+        $c2 = chunk_store::create_token($ctx, -1);
+        $this->assertNull(chunk_store::apply_start(chunk_store::get_record($c2), 0, 100, 100, 'c2.bin', random_bytes(100)));
+        $started = chunk_store::create_token($ctx, -1);
+        chunk_store::begin_random(chunk_store::get_record($started), 1000, 'v.mp4');
+
+        $this->assertSame(2, chunk_store::delete_all_in_state(chunk_store::STATE_COMPLETED));
+        $this->assertNull(chunk_store::get_record($c1));
+        $this->assertNull(chunk_store::get_record($c2));
+        $this->assertNotNull(chunk_store::get_record($started));
+    }
 }

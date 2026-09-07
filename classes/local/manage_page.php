@@ -165,6 +165,62 @@ class manage_page {
     }
 
     /**
+     * Render the "completed uploads" table: staged files that finished uploading but
+     * have not been selected into an activity yet, so they are still sitting in the
+     * chunk area consuming disk until they are used or the cleanup task removes them.
+     * Each row offers a Remove action so an admin can reclaim that space. Returned as
+     * HTML; an empty-state notice when there are none.
+     *
+     * @param \moodle_url $baseurl The Transfers page URL the Remove links post back to.
+     * @return string The rendered table, or the empty-state notification.
+     */
+    public static function completed_uploads_html(\moodle_url $baseurl): string {
+        global $DB, $OUTPUT;
+        $completed = $DB->get_records_select(
+            'repository_largefile_chunks',
+            'state = :state',
+            ['state' => \repository_largefile\chunk_store::STATE_COMPLETED],
+            'lastmodified DESC'
+        );
+        if (!$completed) {
+            return $OUTPUT->notification(
+                get_string('nocompleteduploads', 'repository_largefile'),
+                \core\output\notification::NOTIFY_INFO
+            );
+        }
+        $userids = [];
+        foreach ($completed as $row) {
+            if ($row->userid) {
+                $userids[(int) $row->userid] = true;
+            }
+        }
+        $users = $userids ? $DB->get_records_list('user', 'id', array_keys($userids)) : [];
+        $table = new \html_table();
+        $table->head = [
+            get_string('transferuser', 'repository_largefile'),
+            get_string('sharefilecol', 'repository_largefile'),
+            get_string('uploadsize', 'repository_largefile'),
+            get_string('uploadlastactivity', 'repository_largefile'),
+            get_string('actions'),
+        ];
+        foreach ($completed as $row) {
+            $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
+            $remove = \html_writer::link(
+                new \moodle_url($baseurl, ['action' => 'removecompleted', 'uploadid' => $row->id, 'sesskey' => sesskey()]),
+                get_string('remove')
+            );
+            $table->data[] = [
+                $user ? fullname($user) : '—',
+                format_string((string) $row->filename),
+                display_size((int) $row->length),
+                userdate((int) $row->lastmodified),
+                $remove,
+            ];
+        }
+        return \html_writer::table($table);
+    }
+
+    /**
      * Set a management page up with the admin layout, its title, and a breadcrumb
      * that leads back to the plugin's configuration page.
      *
