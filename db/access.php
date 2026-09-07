@@ -44,9 +44,11 @@ $capabilities = [
         'archetypes'   => [],
     ],
 
-    // Import a backup shared by a trusted peer into this site.
+    // Import a backup shared by a trusted peer into this site. RISK_DATALOSS because
+    // it also authorises removing another user's in-progress upload from the
+    // Transfers monitor, so the role UI must warn about the destructive authority.
     'repository/largefile:import' => [
-        'riskbitmask'  => RISK_PERSONAL,
+        'riskbitmask'  => RISK_PERSONAL | RISK_DATALOSS,
         'captype'      => 'write',
         'contextlevel' => CONTEXT_SYSTEM,
         'archetypes'   => [],

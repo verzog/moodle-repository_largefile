@@ -7,8 +7,13 @@ All notable changes to `repository_largefile` are documented here.
 - **Remove a stalled upload on demand.** The *Uploads in progress* table on the
   Transfers page gains a **Remove** action, so an admin can delete a stuck chunked
   upload (its row and its partial file) immediately rather than waiting for the
-  cleanup task's retention window to elapse. Gated by the `repository/largefile:import`
-  capability the page already requires, and sesskey-guarded. No schema change.
+  cleanup task's retention window to elapse. It re-checks the upload under the
+  background writer's lock and deletes **only** one still in progress — an upload
+  that completed since the page was rendered is never removed (it is the user's file
+  now) — and reports the real outcome instead of always claiming success. Gated by
+  the `repository/largefile:import` capability the page already requires (now marked
+  `RISK_DATALOSS` so the role UI warns about this authority), and sesskey-guarded.
+  No schema change.
 
 ## 0.6.3 — 2026-09-07
 

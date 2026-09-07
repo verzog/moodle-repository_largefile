@@ -651,4 +651,37 @@ class chunk_store {
         }
         $DB->delete_records(self::TABLE, ['id' => $id]);
     }
+
+    /**
+     * Remove a still-in-progress upload on demand — its row and partial file — but
+     * only while it is genuinely unfinished. The state is re-read under the same
+     * per-token lock the background writer uses, so an upload that *completed* after
+     * the admin's page was rendered is never deleted (its file is now the user's),
+     * and a resuming background {@see self::write_range()} cannot interleave and
+     * leave an orphaned partial with no row. The real outcome is reported, so a
+     * filesystem failure is not announced as success.
+     *
+     * @param string $id The upload token id.
+     * @return string 'removed' (row and file gone), 'notstarted' (unknown or already
+     *         complete — nothing removed), or 'failed' (lock unavailable, or the file
+     *         could not be unlinked and the row was kept for the cleanup task).
+     */
+    public static function delete_if_started(string $id): string {
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($id, 10);
+        if (!$lock) {
+            return 'failed';
+        }
+        try {
+            $record = self::get_record($id);
+            if (!$record || (int) $record->state !== self::STATE_STARTED) {
+                return 'notstarted';
+            }
+            self::delete($id);
+            // A surviving row means delete() could not unlink the partial file.
+            return self::get_record($id) ? 'failed' : 'removed';
+        } finally {
+            $lock->release();
+        }
+    }
 }

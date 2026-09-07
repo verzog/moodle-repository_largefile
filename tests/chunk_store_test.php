@@ -361,4 +361,34 @@ final class chunk_store_test extends \advanced_testcase {
         // An unknown token reports null (not an empty gap list).
         $this->assertNull(chunk_store::missing_ranges('0000000001'));
     }
+
+    /**
+     * delete_if_started() removes an in-progress upload but refuses to delete one
+     * that has completed (it is the user's file now) or does not exist, reporting
+     * the real outcome each time.
+     *
+     * @return void
+     */
+    public function test_delete_if_started(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        // A started (still in-progress) upload is removed, row and file.
+        $started = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::begin_random(chunk_store::get_record($started), 2000, 'v.mp4');
+        chunk_store::write_range(chunk_store::get_record($started), 0, 1000, random_bytes(1000));
+        $this->assertSame('removed', chunk_store::delete_if_started($started));
+        $this->assertNull(chunk_store::get_record($started));
+
+        // A completed upload finished after the row was shown is NOT deleted.
+        $done = chunk_store::create_token(\context_system::instance()->id, -1);
+        $donerec = chunk_store::get_record($done);
+        $this->assertNull(chunk_store::apply_start($donerec, 0, 500, 500, 'done.bin', random_bytes(500)));
+        $this->assertTrue(chunk_store::is_complete($done));
+        $this->assertSame('notstarted', chunk_store::delete_if_started($done));
+        $this->assertNotNull(chunk_store::get_record($done));
+
+        // An unknown token: nothing to remove.
+        $this->assertSame('notstarted', chunk_store::delete_if_started('0000000002'));
+    }
 }
