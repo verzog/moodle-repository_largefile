@@ -116,16 +116,23 @@ if ($active) {
     $table->head = [
         get_string('transferuser', 'repository_largefile'),
         get_string('sharefilecol', 'repository_largefile'),
+        get_string('uploadmode', 'repository_largefile'),
         get_string('transferprogress', 'repository_largefile'),
-        get_string('shareexpirescol', 'repository_largefile'),
+        get_string('uploadlastactivity', 'repository_largefile'),
     ];
     foreach ($active as $row) {
         $user = $row->userid ? \core_user::get_user($row->userid) : null;
         $length = (int) $row->length;
         $pct = $length > 0 ? round((int) $row->currentpos * 100 / $length) . '%' : '—';
+        // A Background Fetch upload keeps streaming even after its tab is closed;
+        // an in-page upload only progresses while its browser tab is open.
+        $modekey = \repository_largefile\chunk_store::is_background($row)
+            ? 'uploadmodebackground'
+            : 'uploadmodeforeground';
         $table->data[] = [
             $user ? fullname($user) : '—',
             format_string((string) $row->filename),
+            get_string($modekey, 'repository_largefile'),
             $pct,
             userdate((int) $row->lastmodified),
         ];

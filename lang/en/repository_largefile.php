@@ -256,6 +256,10 @@ $string['uploaded'] = 'File uploaded';
 $string['uploading'] = 'Uploading…';
 $string['uploadinstructions'] = 'The file is uploaded in small chunks, so PHP\'s per-request upload size does not apply. '
     . 'Keep this window open until the upload finishes.';
+$string['uploadlastactivity'] = 'Last activity';
+$string['uploadmode'] = 'Mode';
+$string['uploadmodebackground'] = 'Background (continues after the tab is closed)';
+$string['uploadmodeforeground'] = 'In-page (only while the tab is open)';
 $string['uploadnotfinished'] = 'The upload did not finish.';
 $string['uploadsinprogress'] = 'Uploads in progress';
 $string['url'] = 'File URL';

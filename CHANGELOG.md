@@ -2,6 +2,18 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.1 — 2026-09-07
+
+- **Show background uploads distinctly on the Transfers monitor.** The
+  *Uploads in progress* table now has a **Mode** column marking each upload as
+  **Background (continues after the tab is closed)** or **In-page (only while the
+  tab is open)**, so an admin can see a Background Fetch upload streaming in even
+  after its owner has closed the browser. (No schema change — a background upload
+  is identified by its received-range map, which only that path sets.)
+- **Fix: the last column of that table was mislabelled "Expires".** It showed the
+  upload's **last-activity** time (a timestamp already in the past), not an expiry.
+  It is now correctly headed **Last activity**.
+
 ## 0.6.0 — 2026-09-07
 
 - **Import straight into a course's backup area.** The destination chooser gains

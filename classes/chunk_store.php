@@ -387,6 +387,20 @@ class chunk_store {
     }
 
     /**
+     * Whether a chunk row is a Background Fetch upload (one that keeps running after
+     * the tab is closed) rather than an in-page chunked upload. Only the background
+     * path initialises the received-range map ({@see self::begin_random()}); the
+     * sequential in-page path never touches it, so a non-null receivedmap is the
+     * reliable marker.
+     *
+     * @param \stdClass $row A chunk row (must include the receivedmap field).
+     * @return bool True when the upload is a Background Fetch upload.
+     */
+    public static function is_background($row): bool {
+        return isset($row->receivedmap) && $row->receivedmap !== null && $row->receivedmap !== '';
+    }
+
+    /**
      * Write the first chunk of a new upload, creating the partial file on disk.
      *
      * @param \stdClass $record The token row (mutated and saved on success).
