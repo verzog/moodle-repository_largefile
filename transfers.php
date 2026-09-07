@@ -41,6 +41,16 @@ $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/transfers.php');
 manage_page::setup($baseurl, get_string('transfers', 'repository_largefile'));
 
+// Live-refresh endpoint: return just the uploads-in-progress region so the page's
+// JS can poll it every few seconds without reloading the whole page (which would
+// disturb the admin's "queue a new transfer" form). Read-only and admin-gated by
+// the capability check above; the sesskey keeps it same-origin.
+if (optional_param('ajax', '', PARAM_ALPHA) === 'uploads') {
+    require_sesskey();
+    echo manage_page::active_uploads_html();
+    die;
+}
+
 // A share publication belongs to the sharing capability, not the import one this
 // page requires, so an import-only operator neither sees nor can act on it.
 $canshare = has_capability('repository/largefile:share', $context);
@@ -103,44 +113,16 @@ echo manage_page::tabs('transfers');
 echo $OUTPUT->heading(get_string('transfers', 'repository_largefile'));
 echo html_writer::tag('p', get_string('transfers_desc', 'repository_largefile'), ['class' => 'text-muted']);
 
-// Uploads currently streaming in from a browser (site-wide).
-$active = $DB->get_records_select(
-    'repository_largefile_chunks',
-    'state = :state',
-    ['state' => \repository_largefile\chunk_store::STATE_STARTED],
-    'lastmodified DESC'
-);
+// Uploads currently streaming in from a browser (site-wide). The region is
+// refreshed in place every few seconds by the transfers_monitor module (see the
+// js_call_amd below), so a background upload's progress climbs without a reload.
 echo $OUTPUT->heading(get_string('uploadsinprogress', 'repository_largefile'), 3);
-if ($active) {
-    $table = new html_table();
-    $table->head = [
-        get_string('transferuser', 'repository_largefile'),
-        get_string('sharefilecol', 'repository_largefile'),
-        get_string('uploadmode', 'repository_largefile'),
-        get_string('transferprogress', 'repository_largefile'),
-        get_string('uploadlastactivity', 'repository_largefile'),
-    ];
-    foreach ($active as $row) {
-        $user = $row->userid ? \core_user::get_user($row->userid) : null;
-        $length = (int) $row->length;
-        $pct = $length > 0 ? round((int) $row->currentpos * 100 / $length) . '%' : '—';
-        // A Background Fetch upload keeps streaming even after its tab is closed;
-        // an in-page upload only progresses while its browser tab is open.
-        $modekey = \repository_largefile\chunk_store::is_background($row)
-            ? 'uploadmodebackground'
-            : 'uploadmodeforeground';
-        $table->data[] = [
-            $user ? fullname($user) : '—',
-            format_string((string) $row->filename),
-            get_string($modekey, 'repository_largefile'),
-            $pct,
-            userdate((int) $row->lastmodified),
-        ];
-    }
-    echo html_writer::table($table);
-} else {
-    echo $OUTPUT->notification(get_string('nouploadsinprogress', 'repository_largefile'), \core\output\notification::NOTIFY_INFO);
-}
+echo html_writer::div(manage_page::active_uploads_html(), '', ['id' => 'largefile-active-uploads']);
+$PAGE->requires->js_call_amd('repository_largefile/transfers_monitor', 'init', [[
+    'url' => (new moodle_url($baseurl, ['ajax' => 'uploads', 'sesskey' => sesskey()]))->out(false),
+    'region' => 'largefile-active-uploads',
+    'interval' => 5000,
+]]);
 
 // Queued, running and finished server-side transfers (site-wide).
 $transfers = transfer_manager::list_all();

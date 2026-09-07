@@ -92,6 +92,56 @@ class manage_page {
     }
 
     /**
+     * Render the "uploads in progress" region: a table of every chunked upload
+     * streaming in site-wide (marked Background or In-page), or a notice when there
+     * is none. Returned as an HTML string so the Transfers page and its live-refresh
+     * AJAX endpoint render byte-for-byte the same markup.
+     *
+     * @return string The rendered table, or the empty-state notification.
+     */
+    public static function active_uploads_html(): string {
+        global $DB, $OUTPUT;
+        $active = $DB->get_records_select(
+            'repository_largefile_chunks',
+            'state = :state',
+            ['state' => \repository_largefile\chunk_store::STATE_STARTED],
+            'lastmodified DESC'
+        );
+        if (!$active) {
+            return $OUTPUT->notification(
+                get_string('nouploadsinprogress', 'repository_largefile'),
+                \core\output\notification::NOTIFY_INFO
+            );
+        }
+        $table = new \html_table();
+        $table->head = [
+            get_string('transferuser', 'repository_largefile'),
+            get_string('sharefilecol', 'repository_largefile'),
+            get_string('uploadmode', 'repository_largefile'),
+            get_string('transferprogress', 'repository_largefile'),
+            get_string('uploadlastactivity', 'repository_largefile'),
+        ];
+        foreach ($active as $row) {
+            $user = $row->userid ? \core_user::get_user($row->userid) : null;
+            $length = (int) $row->length;
+            $pct = $length > 0 ? round((int) $row->currentpos * 100 / $length) . '%' : '—';
+            // A Background Fetch upload keeps streaming even after its tab is closed;
+            // an in-page upload only progresses while its browser tab is open.
+            $modekey = \repository_largefile\chunk_store::is_background($row)
+                ? 'uploadmodebackground'
+                : 'uploadmodeforeground';
+            $table->data[] = [
+                $user ? fullname($user) : '—',
+                format_string((string) $row->filename),
+                get_string($modekey, 'repository_largefile'),
+                $pct,
+                userdate((int) $row->lastmodified),
+            ];
+        }
+        return \html_writer::table($table);
+    }
+
+    /**
      * Set a management page up with the admin layout, its title, and a breadcrumb
      * that leads back to the plugin's configuration page.
      *

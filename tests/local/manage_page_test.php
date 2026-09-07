@@ -16,6 +16,8 @@
 
 namespace repository_largefile\local;
 
+use repository_largefile\chunk_store;
+
 /**
  * Tests for the running-progress readout.
  *
@@ -107,5 +109,33 @@ final class manage_page_test extends \advanced_testcase {
 
         $this->assertStringContainsString('0%', $summary);
         $this->assertStringNotContainsString('/s', $summary);
+    }
+
+    /**
+     * The uploads-in-progress region shows the empty-state notice with no uploads,
+     * and lists an active upload with its file, mode and percent — the exact markup
+     * the Transfers page and its live-refresh endpoint both emit.
+     *
+     * @return void
+     */
+    public function test_active_uploads_html(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        // No uploads in progress: the empty-state notice.
+        $this->assertStringContainsString(
+            get_string('nouploadsinprogress', 'repository_largefile'),
+            manage_page::active_uploads_html()
+        );
+
+        // A Background Fetch upload, half received and still in progress.
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        chunk_store::begin_random(chunk_store::get_record($id), 4000, 'lecture.mp4');
+        chunk_store::write_range(chunk_store::get_record($id), 0, 2000, random_bytes(2000));
+
+        $html = manage_page::active_uploads_html();
+        $this->assertStringContainsString('lecture.mp4', $html);
+        $this->assertStringContainsString(get_string('uploadmodebackground', 'repository_largefile'), $html);
+        $this->assertStringContainsString('50%', $html);
     }
 }
