@@ -8,7 +8,11 @@ is too big for a normal upload into any Moodle file picker — including the
   redirects, size-capped), so the browser upload size never applies.
 - **Chunked large-file upload** — the browser uploads the file in small chunks
   that are reassembled on the server, so PHP's `upload_max_filesize` /
-  `post_max_size` never apply.
+  `post_max_size` never apply. If you navigate away mid-upload, the progress is
+  kept: return to the dialogue and re-select the same file to **resume** where it
+  stopped (the browser can only read a local file while the page is open, so the
+  bytes pause when you leave; a URL import or the Transfers page is the fully
+  unattended route).
 
 Because it is a repository plugin, both appear **everywhere the file picker is
 used** (assignments, resources, the course restore upload, …) with no per-place
