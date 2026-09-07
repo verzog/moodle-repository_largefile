@@ -169,11 +169,16 @@ switch ($action) {
         $start = optional_param('start', null, PARAM_INT);
         $end = optional_param('end', null, PARAM_INT);
         if ($start === null || $end === null) {
+            http_response_code(400);
             $senderror('Param start or end is missing');
         }
         $content = file_get_contents('php://input', false, null, 0, $end - $start);
         $result = chunk_store::write_range($record, $start, $end, (string) $content);
         if (is_string($result)) {
+            // Background Fetch judges a request by its HTTP status, not the JSON body,
+            // so a failed chunk must return a non-2xx status — otherwise the browser
+            // would count it as delivered and could fire success on an incomplete upload.
+            http_response_code(400);
             $senderror($result);
         }
         echo json_encode((object) $result);

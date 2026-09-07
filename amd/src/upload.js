@@ -83,6 +83,32 @@ let listenersRegistered = false;
 /** @var {Promise|null} Memoised service-worker registration for Background Fetch. */
 let swRegistrationPromise = null;
 
+/** @var {boolean} Whether the module-level service-worker message listener is set. */
+let swMessageListenerRegistered = false;
+
+/** @var {Array} Picker-refresh callbacks to run when a background upload completes. */
+const bgCompletionCallbacks = [];
+
+/**
+ * Register (once, at module scope so it outlives any dialogue) a listener for the
+ * service worker's background-fetch completion message, refreshing every picker
+ * that handed off a background upload. The per-dialogue listener would be gone by
+ * the time the upload finishes, so completion is handled here instead.
+ *
+ * @return {void}
+ */
+const ensureSwMessageListener = () => {
+    if (swMessageListenerRegistered || !BG_SUPPORTED || !navigator.serviceWorker) {
+        return;
+    }
+    swMessageListenerRegistered = true;
+    navigator.serviceWorker.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'repository_largefile_bgcomplete') {
+            bgCompletionCallbacks.forEach((callback) => callback());
+        }
+    });
+};
+
 /**
  * Register (once) the plugin's service worker, which owns Background Fetch uploads
  * so they continue after the page closes. Its scope is the plugin directory, which
@@ -94,9 +120,36 @@ const getServiceWorker = () => {
     if (swRegistrationPromise === null) {
         const scope = config.wwwroot + '/repository/largefile/';
         swRegistrationPromise = navigator.serviceWorker.register(scope + 'sw.js', {scope})
-            .then((registration) => navigator.serviceWorker.ready.then(() => registration));
+            .then((registration) => waitForActive(registration).then(() => registration));
     }
     return swRegistrationPromise;
+};
+
+/**
+ * Resolve once a service-worker registration has an active worker. This does not
+ * use navigator.serviceWorker.ready, which waits for the worker that controls the
+ * *current page* — our worker is scoped to the plugin directory and does not
+ * control the file-picker page it is registered from, so `ready` would never
+ * resolve there.
+ *
+ * @param {ServiceWorkerRegistration} registration The registration to await.
+ * @return {Promise} Resolves when the registration is active.
+ */
+const waitForActive = (registration) => {
+    if (registration.active) {
+        return Promise.resolve();
+    }
+    const worker = registration.installing || registration.waiting;
+    if (!worker) {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        worker.addEventListener('statechange', () => {
+            if (worker.state === 'activated') {
+                resolve();
+            }
+        });
+    });
 };
 
 /**
@@ -132,9 +185,12 @@ const startBackgroundUpload = async(file, token) => {
             headers: {'Content-Type': 'application/octet-stream'},
         }));
     }
+    // These requests upload the file slices (Background Fetch derives uploadTotal
+    // from their bodies); the responses are only small JSON, so downloadTotal is
+    // left at its default — declaring the file size there would make the browser
+    // expect a whole file back and can fail the fetch with download-total-exceeded.
     await registration.backgroundFetch.fetch('repository_largefile-' + token.id, requests, {
         title: file.name,
-        downloadTotal: file.size,
     });
 };
 
@@ -585,17 +641,6 @@ const openUploadModal = async(data) => {
     };
     window.addEventListener('beforeunload', beforeUnload);
 
-    // When a background upload finishes, the service worker messages any open page;
-    // refresh the picker so the completed file appears without a manual reopen.
-    const onSwMessage = (e) => {
-        if (e.data && e.data.type === 'repository_largefile_bgcomplete') {
-            data.callback();
-        }
-    };
-    if (BG_SUPPORTED && navigator.serviceWorker) {
-        navigator.serviceWorker.addEventListener('message', onSwMessage);
-    }
-
     root.on(ModalEvents.shown, async() => {
         selectedFile = null;
         resumeActive = false;
@@ -635,9 +680,6 @@ const openUploadModal = async(data) => {
     root.on(ModalEvents.cancel, abort);
     root.on(ModalEvents.hidden, () => {
         window.removeEventListener('beforeunload', beforeUnload);
-        if (BG_SUPPORTED && navigator.serviceWorker) {
-            navigator.serviceWorker.removeEventListener('message', onSwMessage);
-        }
         abort();
         modal.destroy();
     });
@@ -687,8 +729,17 @@ const openUploadModal = async(data) => {
                     if (bgtoken.maxbytes > 0 && selectedFile.size > bgtoken.maxbytes) {
                         throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
                     }
+                    // Track the token from now, so if service-worker registration or the
+                    // fetch handoff fails (or the user cancels during setup) the catch or
+                    // abort deletes its pre-sized file rather than orphaning it.
+                    controller.token = bgtoken.id;
                     setStatus(await getString('bgstarting', 'repository_largefile'));
                     await startBackgroundUpload(selectedFile, bgtoken);
+                    // Handoff succeeded: the browser owns the upload now. Refresh the
+                    // picker when it completes (a module-level listener, since this
+                    // dialogue will be gone by then).
+                    ensureSwMessageListener();
+                    bgCompletionCallbacks.push(data.callback);
                     backgroundHandedOff = true;
                     controller.token = null;
                     writeResume(data.contextId, null);

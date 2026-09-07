@@ -54,6 +54,9 @@ self.addEventListener('backgroundfetchclick', (event) => {
         if (pages.length) {
             return pages[0].focus();
         }
-        return self.clients.openWindow('./');
+        // This worker lives at <wwwroot>/repository/largefile/sw.js, so '../../'
+        // resolves to the Moodle root (wwwroot) rather than the plugin directory,
+        // which has no landing page.
+        return self.clients.openWindow(new URL('../../', self.location).href);
     })());
 });
