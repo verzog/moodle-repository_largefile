@@ -174,11 +174,15 @@ Large file*) carries an **import policy**:
   rejected upload is refused at its first chunk, before any bytes are written).
 - **Destinations.** An imported file can be routed to your **private backup area**
   (where it appears under *Restore > User private backup area*, ready to restore),
-  the **large file picker** (to pick into an activity — a video as a resource, a
-  SCORM package as a SCORM activity), or generic **private files**. Choose which
-  destinations are offered site-wide; the Import form only shows those that also
-  suit the file's kind, and a file whose kind has just one enabled destination is
-  routed there automatically.
+  a chosen **course's backup area** (where it appears under *Restore > Course
+  backup area* on that course — you pick the course, and it is offered only for the
+  courses you may add a backup to, `moodle/restore:uploadfile`), the **large file
+  picker** (to pick into an activity — a video as a resource, a SCORM package as a
+  SCORM activity), or generic **private files**. Choose which destinations are
+  offered site-wide; the Import form only shows those that also suit the file's
+  kind, and a file whose kind has just one enabled destination is routed there
+  automatically. The course backup area is always an explicit choice — it needs a
+  target course, so it is never the automatic route.
 
 ## Scheduled, unattended transfers
 

@@ -98,7 +98,8 @@ class transfer_runner {
             $fetched['path'],
             $fetched['filename'],
             $destination,
-            $contextid
+            $contextid,
+            (int) ($payload['targetcourseid'] ?? 0)
         );
     }
 
@@ -130,7 +131,8 @@ class transfer_runner {
             $result['path'],
             $result['filename'],
             $destination,
-            $contextid
+            $contextid,
+            (int) ($payload['targetcourseid'] ?? 0)
         );
 
         // Emit the same domain event as the synchronous import path (import.php),

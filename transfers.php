@@ -72,18 +72,25 @@ if ($data = $form->get_data()) {
     $when = ($data->when ?? 'now') === 'at' ? (int) $data->scheduledtime : 0;
     // Empty means "auto": the policy routes to the file kind's default destination.
     $destination = $data->destination ?? '';
+    // Target course for the course backup area destination (0 otherwise).
+    $targetcourseid = (int) ($data->courseid ?? 0);
     if ($data->type === transfer_manager::TYPE_SHARE && $peers) {
         transfer_manager::create(
             transfer_manager::TYPE_SHARE,
             (int) $USER->id,
-            ['peerid' => (int) $data->peerid, 'shareurl' => $data->shareurl, 'destination' => $destination],
+            [
+                'peerid' => (int) $data->peerid,
+                'shareurl' => $data->shareurl,
+                'destination' => $destination,
+                'targetcourseid' => $targetcourseid,
+            ],
             $when
         );
     } else {
         transfer_manager::create(
             transfer_manager::TYPE_URL,
             (int) $USER->id,
-            ['url' => $data->url, 'destination' => $destination],
+            ['url' => $data->url, 'destination' => $destination, 'targetcourseid' => $targetcourseid],
             $when,
             $context->id
         );
