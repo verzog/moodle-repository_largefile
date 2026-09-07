@@ -2,6 +2,26 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.6.3 — 2026-09-07
+
+- **Recover a stalled Background Fetch upload instead of losing it.** The browser
+  fails the *whole* background upload if any single chunk request fails, which
+  could leave a large upload stranded a chunk short: it sat in the Transfers
+  monitor near 100% but, never marked complete, never appeared in the file picker.
+  Now such an upload is **resumable** — re-open the upload dialogue and re-select
+  the same file, and only the **missing byte ranges** are uploaded (in the
+  foreground, reliably) until it completes and shows up in the picker. No whole-file
+  re-upload. New server helper `chunk_store::missing_ranges()` and a `bgstatus`
+  endpoint; the background handoff now keeps a resume record (cleared automatically
+  once the server confirms completion).
+- **Chunk writes are now atomic.** `write_range()` writes the bytes and records the
+  received range under one lock, so a lock/write hiccup can no longer leave bytes on
+  disk that the range map does not count (which would strand a physically complete
+  upload as unfinished).
+- **Honest progress on the monitor.** The *Uploads in progress* percentage is now
+  floored, so an upload one chunk short reads e.g. `99%` rather than rounding up to
+  a misleading `100%`. No schema change.
+
 ## 0.6.2 — 2026-09-07
 
 - **The Transfers monitor now refreshes the "uploads in progress" table live.**

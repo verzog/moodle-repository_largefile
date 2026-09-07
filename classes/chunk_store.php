@@ -261,23 +261,12 @@ class chunk_store {
         if (strlen($content) !== $end - $start) {
             return 'Filechunk is not as long as it should be.';
         }
-        $target = self::get_path_for_id($record->id);
-        $handle = @fopen($target, 'c+');
-        if ($handle === false) {
-            return 'Failed to open the upload file.';
-        }
-        if (@fseek($handle, $start) !== 0) {
-            @fclose($handle);
-            return 'Failed to seek in the upload file.';
-        }
-        $written = @fwrite($handle, $content);
-        @fclose($handle);
-        if ($written !== strlen($content)) {
-            return 'Failed to write chunk to disk.';
-        }
 
-        // Record the received range under a short per-token lock so parallel chunk
-        // writes cannot lose each other's updates to the range set.
+        // Write the bytes and record the range under one short per-token lock, so the
+        // two stay consistent: the chunk is either fully applied (bytes on disk AND
+        // its range counted) or not applied at all. Doing the disk write outside the
+        // lock could leave bytes on disk that a failed range-set update never counts,
+        // stranding an upload that is physically complete but marked unfinished.
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($record->id, 10);
         if (!$lock) {
@@ -287,6 +276,20 @@ class chunk_store {
             $fresh = self::get_record($record->id);
             if (!$fresh) {
                 return 'The upload was cancelled.';
+            }
+            $target = self::get_path_for_id($record->id);
+            $handle = @fopen($target, 'c+');
+            if ($handle === false) {
+                return 'Failed to open the upload file.';
+            }
+            $seeked = @fseek($handle, $start) === 0;
+            $written = $seeked ? @fwrite($handle, $content) : false;
+            @fclose($handle);
+            if (!$seeked) {
+                return 'Failed to seek in the upload file.';
+            }
+            if ($written !== strlen($content)) {
+                return 'Failed to write chunk to disk.';
             }
             $ranges = self::add_range(json_decode($fresh->receivedmap ?: '[]', true) ?: [], $start, $end);
             $covered = self::covered_bytes($ranges);
@@ -302,6 +305,44 @@ class chunk_store {
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * The byte ranges of an out-of-order upload that have *not* yet been received —
+     * the gaps in [0, length) not covered by the received-range map. A Background
+     * Fetch upload that stalled part-way (the browser fails the whole fetch if any
+     * one chunk request fails) can be finished by uploading exactly these ranges,
+     * so re-selecting the same file resumes it rather than starting over.
+     *
+     * @param string $id The upload token id.
+     * @return array|null List of [start, end) gaps (empty when complete), or null if
+     *         the token is unknown.
+     */
+    public static function missing_ranges(string $id): ?array {
+        global $DB;
+        $record = $DB->get_record(self::TABLE, ['id' => $id], 'id, length, receivedmap', IGNORE_MISSING);
+        if (!$record) {
+            return null;
+        }
+        $length = (int) $record->length;
+        if ($length <= 0) {
+            return [];
+        }
+        $ranges = json_decode($record->receivedmap ?: '[]', true) ?: [];
+        usort($ranges, fn($a, $b) => $a[0] <=> $b[0]);
+        $missing = [];
+        $cursor = 0;
+        foreach ($ranges as $range) {
+            $rangestart = (int) $range[0];
+            if ($rangestart > $cursor) {
+                $missing[] = [$cursor, $rangestart];
+            }
+            $cursor = max($cursor, (int) $range[1]);
+        }
+        if ($cursor < $length) {
+            $missing[] = [$cursor, $length];
+        }
+        return $missing;
     }
 
     /**
