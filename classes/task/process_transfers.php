@@ -72,9 +72,16 @@ class process_transfers extends \core\task\scheduled_task {
      * @return int Seconds.
      */
     private static function lease_seconds(): int {
-        $seconds = (int) get_config('largefile', 'transferlease');
+        $raw = get_config('largefile', 'transferlease');
+        // Distinguish absent from below-floor: an unset setting takes the default; a
+        // configured value under the floor is clamped up rather than silently reset,
+        // so an admin who wants faster recovery than the default gets it.
+        if ($raw === false || $raw === '') {
+            return self::DEFAULT_LEASE;
+        }
+        $seconds = (int) $raw;
         if ($seconds < self::MIN_LEASE) {
-            $seconds = self::DEFAULT_LEASE;
+            return self::MIN_LEASE;
         }
         return min($seconds, self::MAX_LEASE);
     }

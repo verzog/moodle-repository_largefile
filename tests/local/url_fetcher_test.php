@@ -93,13 +93,19 @@ final class url_fetcher_test extends \advanced_testcase {
      */
     public function test_stall_window_from_setting(): void {
         $this->resetAfterTest();
+        // Absent (never configured) uses the 2-minute default.
         unset_config('transferstall', 'largefile');
         $this->assertSame(120, url_fetcher::stall_window_seconds());
+        // A configured value in range is honoured verbatim.
         set_config('transferstall', 300, 'largefile');
         $this->assertSame(300, url_fetcher::stall_window_seconds());
-        // Absurd values are bounded — never zero, never a day.
+        // Below the documented floor: clamp up to the floor, do NOT silently reset
+        // to the default — the admin asked for shorter.
         set_config('transferstall', 5, 'largefile');
-        $this->assertSame(120, url_fetcher::stall_window_seconds());
+        $this->assertSame(30, url_fetcher::stall_window_seconds());
+        set_config('transferstall', 30, 'largefile');
+        $this->assertSame(30, url_fetcher::stall_window_seconds());
+        // Above the ceiling: clamp down to the ceiling.
         set_config('transferstall', 999999, 'largefile');
         $this->assertSame(3600, url_fetcher::stall_window_seconds());
     }

@@ -295,9 +295,17 @@ class url_fetcher {
      * @return int Seconds.
      */
     public static function stall_window_seconds(): int {
-        $seconds = (int) get_config('largefile', 'transferstall');
+        $raw = get_config('largefile', 'transferstall');
+        // Distinguish absent from below-floor: an unset setting takes the default
+        // (2 minutes); a configured value below the documented floor is clamped up
+        // to the floor, so an admin who sets a very small window gets what the
+        // help text advertises rather than a silent bump to the default.
+        if ($raw === false || $raw === '') {
+            return 120;
+        }
+        $seconds = (int) $raw;
         if ($seconds < 30) {
-            $seconds = 120;
+            return 30;
         }
         return min($seconds, 3600);
     }
