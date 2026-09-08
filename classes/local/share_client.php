@@ -42,6 +42,19 @@ class share_client {
     private const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
     /**
+     * Load Moodle's `\curl` class (in filelib.php) before instantiating it. Called
+     * on entry to every public method that uses cURL, so a caller that hasn't
+     * already pulled filelib in (a management page reached in isolation) does not
+     * trip on "Class curl not found".
+     *
+     * @return void
+     */
+    private static function require_curl(): void {
+        global $CFG;
+        require_once($CFG->libdir . '/filelib.php');
+    }
+
+    /**
      * Fetch, decrypt and verify a shared backup from a peer.
      *
      * @param int $peerid The peer the share came from (whose secret unlocks it).
@@ -52,6 +65,7 @@ class share_client {
      * @throws \moodle_exception On any transport, authentication or integrity failure.
      */
     public static function import(int $peerid, string $shareurl, ?callable $onmeta = null): array {
+        self::require_curl();
         $secret = peer_manager::get_secret($peerid);
         if ($secret === null) {
             throw new \moodle_exception('errorsharenopeer', 'repository_largefile');
@@ -123,6 +137,7 @@ class share_client {
      * @return array Keys 'ok' (bool) and 'message' (a human-readable outcome).
      */
     public static function ping(int $peerid): array {
+        self::require_curl();
         $peer = peer_manager::get($peerid);
         $secret = peer_manager::get_secret($peerid);
         if (!$peer || $secret === null) {
