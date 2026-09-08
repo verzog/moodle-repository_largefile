@@ -27,7 +27,7 @@
  * transfer row so the admin monitor and the owner can see what happened.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -37,7 +37,7 @@ namespace repository_largefile\local;
  * Executes a single queued transfer on the server.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class transfer_runner {

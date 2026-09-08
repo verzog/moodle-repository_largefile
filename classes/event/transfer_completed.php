@@ -18,7 +18,7 @@
  * Event: a queued server-side transfer finished successfully.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -28,7 +28,7 @@ namespace repository_largefile\event;
  * Event: a queued server-side transfer finished successfully.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class transfer_completed extends \core\event\base {

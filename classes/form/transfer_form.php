@@ -18,7 +18,7 @@
  * Queue-a-transfer form: choose a URL or peer-share import and when to run it.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -34,7 +34,7 @@ use repository_largefile\local\transfer_manager;
  * Queue-a-transfer form.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class transfer_form extends \moodleform {

@@ -18,7 +18,7 @@
  * Scheduled task that runs due queued transfers, unattended.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -31,7 +31,7 @@ use repository_largefile\local\transfer_runner;
  * Runs due queued transfers.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class process_transfers extends \core\task\scheduled_task {

@@ -24,7 +24,7 @@
  * the recovered plaintext against the advertised SHA-256 before returning it.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -34,7 +34,7 @@ namespace repository_largefile\local;
  * Receiver side of backup sharing: fetch, decrypt and verify a peer's share.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class share_client {
@@ -58,7 +58,7 @@ class share_client {
         $security = self::peer_security($peerid, $base);
 
         $meta = self::fetch_meta($base, $token, $secret, $security);
-        if (!isset($meta['sha256'], $meta['salt'], $meta['filename'])) {
+        if (!self::meta_is_wellformed($meta)) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
 
@@ -78,6 +78,28 @@ class share_client {
         }
 
         return ['path' => $plainpath, 'filename' => clean_param($meta['filename'], PARAM_FILE)];
+    }
+
+    /**
+     * Whether share metadata from a peer has the shape this client relies on: a hex
+     * salt of the agreed length, a hex SHA-256 and a usable file name. The response
+     * body is not itself signed, so a malformed or hostile reply must fail cleanly
+     * here rather than as a type error inside key derivation.
+     *
+     * @param array $meta The decoded metadata.
+     * @return bool True when every required field is present and well-formed.
+     */
+    public static function meta_is_wellformed(array $meta): bool {
+        if (!isset($meta['sha256'], $meta['salt'], $meta['filename'])) {
+            return false;
+        }
+        if (!is_string($meta['salt']) || !preg_match('/^[0-9a-f]{' . (2 * crypto::salt_bytes()) . '}$/i', $meta['salt'])) {
+            return false;
+        }
+        if (!is_string($meta['sha256']) || !preg_match('/^[0-9a-f]{64}$/i', $meta['sha256'])) {
+            return false;
+        }
+        return is_string($meta['filename']) && clean_param($meta['filename'], PARAM_FILE) !== '';
     }
 
     /**

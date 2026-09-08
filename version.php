@@ -18,15 +18,15 @@
  * Plugin version and metadata.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'repository_largefile';
-$plugin->version   = 2026090615;      // YYYYMMDDXX. This release.
+$plugin->version   = 2026090616;      // YYYYMMDDXX. This release.
 $plugin->requires  = 2025041400;      // Moodle 5.0.0 (the lowest supported release).
 $plugin->supported = [500, 502];      // Supports Moodle 5.0 to 5.2 inclusive.
 $plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.6.5';
+$plugin->release   = '0.6.6';

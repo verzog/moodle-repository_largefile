@@ -20,7 +20,7 @@ namespace repository_largefile\local;
  * Tests for the receiver's peer-host security gate.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\share_client
  */
@@ -89,5 +89,39 @@ final class share_client_test extends \advanced_testcase {
         $id = peer_manager::create('Legacy', str_repeat('s', 24));
 
         $this->assertNull($this->invoke_peer_security($id, 'https://anywhere.example.org/share.php'));
+    }
+
+    /**
+     * Share metadata from a peer is accepted only when its salt and SHA-256 are hex of
+     * the agreed lengths and its file name is usable, so a malformed or hostile reply
+     * fails cleanly instead of reaching key derivation.
+     *
+     * @dataProvider meta_provider
+     * @param array $meta The decoded metadata.
+     * @param bool $expected Whether it should be accepted.
+     * @return void
+     */
+    public function test_meta_is_wellformed(array $meta, bool $expected): void {
+        $this->assertSame($expected, share_client::meta_is_wellformed($meta));
+    }
+
+    /**
+     * Cases for test_meta_is_wellformed.
+     *
+     * @return array
+     */
+    public static function meta_provider(): array {
+        $good = ['filename' => 'backup.mbz', 'salt' => str_repeat('ab', 16), 'sha256' => str_repeat('c', 64)];
+        return [
+            'well-formed' => [$good, true],
+            'upper-case hex' => [array_merge($good, ['salt' => str_repeat('AB', 16)]), true],
+            'missing salt' => [array_diff_key($good, ['salt' => 1]), false],
+            'salt not hex' => [array_merge($good, ['salt' => str_repeat('zz', 16)]), false],
+            'salt wrong length' => [array_merge($good, ['salt' => 'abcd']), false],
+            'sha256 wrong length' => [array_merge($good, ['sha256' => 'abcd']), false],
+            'sha256 not a string' => [array_merge($good, ['sha256' => 12345]), false],
+            'empty filename' => [array_merge($good, ['filename' => '']), false],
+            'filename is only path separators' => [array_merge($good, ['filename' => '../']), false],
+        ];
     }
 }

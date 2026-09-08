@@ -18,7 +18,7 @@
  * Privacy provider for repository_largefile.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -39,7 +39,7 @@ use core_privacy\local\request\approved_userlist;
  * the uploaded file's name, so they are declared and made exportable/erasable.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class provider implements
@@ -92,14 +92,23 @@ class provider implements
             "SELECT DISTINCT contextid FROM {repository_largefile_chunks} WHERE userid = :userid AND contextid IS NOT NULL",
             ['userid' => $userid]
         );
-        // Shares and transfers are created at the system context.
+        // Shares and transfers are created at the system context. Select that
+        // context's row from {context} rather than emitting the id as a bound
+        // parameter: PostgreSQL types a bare parameter in a SELECT list as text,
+        // which the privacy API's join against ctx.id (bigint) then rejects.
         $contextlist->add_from_sql(
-            "SELECT DISTINCT :sysctx AS contextid FROM {repository_largefile_shares} WHERE userid = :userid",
-            ['sysctx' => \context_system::instance()->id, 'userid' => $userid]
+            "SELECT ctx.id AS contextid
+               FROM {context} ctx
+              WHERE ctx.contextlevel = :ctxlevel
+                AND EXISTS (SELECT 1 FROM {repository_largefile_shares} s WHERE s.userid = :userid)",
+            ['ctxlevel' => CONTEXT_SYSTEM, 'userid' => $userid]
         );
         $contextlist->add_from_sql(
-            "SELECT DISTINCT :sysctxt AS contextid FROM {repository_largefile_transfers} WHERE userid = :userid",
-            ['sysctxt' => \context_system::instance()->id, 'userid' => $userid]
+            "SELECT ctx.id AS contextid
+               FROM {context} ctx
+              WHERE ctx.contextlevel = :ctxlevel
+                AND EXISTS (SELECT 1 FROM {repository_largefile_transfers} t WHERE t.userid = :userid)",
+            ['ctxlevel' => CONTEXT_SYSTEM, 'userid' => $userid]
         );
         return $contextlist;
     }

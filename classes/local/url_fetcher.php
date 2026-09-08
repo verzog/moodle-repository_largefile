@@ -28,7 +28,7 @@
  * or endless body cannot fill the disk.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -38,7 +38,7 @@ namespace repository_largefile\local;
  * Streams a remote file to a temporary path for the Large file repository.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class url_fetcher {
@@ -47,13 +47,18 @@ class url_fetcher {
         'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
     /**
-     * @var int Finite download ceiling used when the caller sets no limit (0).
-     * 2 GB - 1: the largest value that stays an int (not a float) on 32-bit PHP,
-     * so it never trips download_one()'s int handling, while still bounding a
-     * hostile or misconfigured endpoint that would otherwise stream until the
-     * timeout and fill the disk.
+     * @var int Fallback download ceiling used when the caller sets no limit (0) and
+     * the free space on the download filesystem cannot be measured. 2 GB - 1, the
+     * largest value that stays an int on 32-bit PHP.
      */
     private const DEFAULT_MAXBYTES = 2147483647;
+
+    /**
+     * @var int Disk space (1 GiB) an unlimited download must leave free, so a fetch
+     * that is allowed to be as large as the disk can hold still cannot fill it
+     * completely and take the site down with it.
+     */
+    private const DISK_RESERVE = 1073741824;
 
     /** @var string|null Effective URL of the most recent download (after redirects). */
     private ?string $lastfinalurl = null;
@@ -101,18 +106,23 @@ class url_fetcher {
             throw new \moodle_exception('errorbadurl', 'repository_largefile');
         }
 
-        // Always enforce a finite cap: when the caller imposes none (0), fall back
-        // to a bounded ceiling so an oversize or endless body cannot fill the disk.
-        $maxbytes = $maxbytes > 0 ? $maxbytes : self::DEFAULT_MAXBYTES;
-
         $this->lastfinalurl = null;
         $this->lastcontenttype = null;
         $this->lastdispositionname = null;
 
-        $target = tempnam(make_request_directory(), 'largefile_');
+        $tempdir = make_request_directory();
+        $target = tempnam($tempdir, 'largefile_');
         if ($target === false) {
             throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
         }
+        // Always enforce a finite cap: when the caller imposes none (0, an unlimited
+        // user or site), bound the fetch by the disk it lands on, so an oversize or
+        // endless body cannot fill it — without an arbitrary ceiling that would stop
+        // a legitimately huge (multi-gigabyte) backup. That ceiling is a snapshot,
+        // so an unlimited fetch also re-checks free space as it streams (below):
+        // several concurrent fetches would otherwise each be allowed the same space.
+        $disk = (object) ['unlimited' => $maxbytes <= 0, 'dir' => $tempdir, 'lastcheck' => 0.0, 'full' => false];
+        $maxbytes = $disk->unlimited ? self::unlimited_ceiling($tempdir) : $maxbytes;
         $fh = fopen($target, 'wb');
         if ($fh === false) {
             @unlink($target);
@@ -136,11 +146,27 @@ class url_fetcher {
         // on disk; also abort promptly when the caller signals cancellation, so a
         // fetch for a dialogue the user closed does not keep streaming.
         $options['CURLOPT_NOPROGRESS'] = 0;
-        $options['CURLOPT_PROGRESSFUNCTION'] = function ($ch, $dltotal, $dlnow) use ($maxbytes, $iscancelled) {
+        $options['CURLOPT_PROGRESSFUNCTION'] = function ($ch, $dltotal, $dlnow) use ($maxbytes, $iscancelled, $disk) {
             if ($iscancelled !== null && $iscancelled()) {
                 return 1;
             }
-            return ($dltotal > $maxbytes || $dlnow > $maxbytes) ? 1 : 0;
+            if ($dltotal > $maxbytes || $dlnow > $maxbytes) {
+                return 1;
+            }
+            // An unlimited fetch shares the disk with every other transfer, so the
+            // reserve is enforced live (throttled: a stat every couple of seconds),
+            // not just against the free space measured when this fetch began.
+            if ($disk->unlimited) {
+                $now = microtime(true);
+                if ($now - $disk->lastcheck >= 2.0) {
+                    $disk->lastcheck = $now;
+                    if (self::disk_below_reserve($disk->dir)) {
+                        $disk->full = true;
+                        return 1;
+                    }
+                }
+            }
+            return 0;
         };
         $result = $curl->download_one($url, null, $options);
         fclose($fh);
@@ -154,10 +180,14 @@ class url_fetcher {
         $raw = $curl->rawresponse ?? '';
         $this->lastdispositionname = $this->disposition_filename(is_array($raw) ? implode("\n", $raw) : (string) $raw);
 
-        // CURLE_ABORTED_BY_CALLBACK (42): the progress callback stopped an oversize
-        // transfer. Report it as "too big", not a generic failure.
+        // CURLE_ABORTED_BY_CALLBACK (42): the progress callback stopped the transfer,
+        // either because the disk ran low or because the body was oversize. Report
+        // which, not a generic failure.
         if ((int) ($curl->errno ?? 0) === 42) {
             @unlink($target);
+            if ($disk->full) {
+                throw new \moodle_exception('errordownloaddiskfull', 'repository_largefile');
+            }
             throw new \moodle_exception('errordownloadtoobig', 'repository_largefile');
         }
         if ($result !== true || !empty($curl->errno)) {
@@ -182,6 +212,40 @@ class url_fetcher {
             'filename' => $this->derive_filename($url),
             'contenttype' => $this->lastcontenttype ?? '',
         ];
+    }
+
+    /**
+     * The size ceiling for a download with no caller-imposed limit: the free space
+     * on the filesystem the download is written to, less a reserve, so the transfer
+     * can be as large as the disk can actually hold but can never fill it. Falls
+     * back to a fixed 2 GB ceiling when free space cannot be measured.
+     *
+     * @param string $dir A directory on the filesystem the download is written to.
+     * @return int The ceiling in bytes (always positive).
+     */
+    public static function unlimited_ceiling(string $dir): int {
+        $free = @disk_free_space($dir);
+        if ($free === false || !is_finite($free)) {
+            return self::DEFAULT_MAXBYTES;
+        }
+        $ceiling = (int) min($free, (float) PHP_INT_MAX) - self::DISK_RESERVE;
+        // A nearly full disk still gets the small fixed ceiling rather than zero or
+        // a negative cap, which the caller would read as "unlimited".
+        return $ceiling > 0 ? $ceiling : self::DEFAULT_MAXBYTES;
+    }
+
+    /**
+     * Whether the filesystem holding $dir has dropped below the disk reserve, so a
+     * running unlimited fetch must stop. Unknown free space (an unmeasurable
+     * directory) does not count as low: such a fetch is already bounded by the fixed
+     * fallback ceiling.
+     *
+     * @param string $dir A directory on the filesystem being written to.
+     * @return bool True when free space is known and below the reserve.
+     */
+    public static function disk_below_reserve(string $dir): bool {
+        $free = @disk_free_space($dir);
+        return $free !== false && is_finite($free) && $free < self::DISK_RESERVE;
     }
 
     /**

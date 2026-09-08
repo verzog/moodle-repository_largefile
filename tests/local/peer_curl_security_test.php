@@ -20,7 +20,7 @@ namespace repository_largefile\local;
  * Tests for the peer-scoped cURL security helper.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\peer_curl_security
  */

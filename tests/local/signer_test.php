@@ -20,7 +20,7 @@ namespace repository_largefile\local;
  * Tests for HMAC request signing and replay protection.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\signer
  */
@@ -90,5 +90,31 @@ final class signer_test extends \advanced_testcase {
         $signed = signer::sign(['token' => 'abc'], $secret);
         $this->assertNull(signer::verify($signed, $secret));
         $this->assertSame('errorsharereplay', signer::verify($signed, $secret));
+    }
+
+    /**
+     * A stale request with a bad signature is reported as a bad signature, never as
+     * stale: otherwise an unauthenticated caller could tell a real share token apart
+     * from a guessed one by sending an old timestamp and reading which error came back.
+     *
+     * @return void
+     */
+    public function test_bad_signature_is_reported_before_staleness(): void {
+        $this->resetAfterTest();
+        $signed = signer::sign(['token' => 'abc'], crypto::generate_secret());
+        $signed['ts'] = (string) (time() - 1000);
+        $this->assertSame('errorsharesig', signer::verify($signed, crypto::generate_secret()));
+    }
+
+    /**
+     * A nonce is kept for at least twice the freshness window: a request stamped at
+     * the future edge of the window is still fresh two windows after it was received,
+     * so purging its nonce any sooner would reopen it to replay.
+     *
+     * @return void
+     */
+    public function test_nonce_retention_outlives_every_fresh_timestamp(): void {
+        $window = (new \ReflectionClassConstant(signer::class, 'TIME_WINDOW'))->getValue();
+        $this->assertGreaterThanOrEqual(2 * $window, signer::nonce_retention());
     }
 }

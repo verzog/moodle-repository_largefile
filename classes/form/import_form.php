@@ -18,7 +18,7 @@
  * Import-a-shared-backup form: a peer and the share link they sent.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -32,7 +32,7 @@ require_once($GLOBALS['CFG']->libdir . '/formslib.php');
  * Import-a-shared-backup form.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class import_form extends \moodleform {

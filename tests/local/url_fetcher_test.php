@@ -20,7 +20,7 @@ namespace repository_largefile\local;
  * Tests for the URL fetcher's input validation.
  *
  * @package    repository_largefile
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\url_fetcher
  */
@@ -55,5 +55,42 @@ final class url_fetcher_test extends \basic_testcase {
             'scheme only' => ['https://', false],
             'not a url' => ['just some text', false],
         ];
+    }
+
+    /**
+     * The ceiling for an unlimited fetch is always a positive, finite byte count: the
+     * free space on the download filesystem less a reserve where it can be measured,
+     * and a fixed fallback where it cannot (an unreadable or missing directory).
+     *
+     * @return void
+     */
+    public function test_unlimited_ceiling_is_positive_and_finite(): void {
+        $measured = url_fetcher::unlimited_ceiling(sys_get_temp_dir());
+        $this->assertGreaterThan(0, $measured);
+        $this->assertLessThanOrEqual(PHP_INT_MAX, $measured);
+        $free = disk_free_space(sys_get_temp_dir());
+        if ($free !== false && $free > 2 * 1073741824) {
+            // Enough room to measure: the ceiling leaves the 1 GiB reserve untouched.
+            $this->assertLessThan((int) $free, $measured);
+        }
+
+        $this->assertSame(2147483647, url_fetcher::unlimited_ceiling('/nonexistent/' . uniqid()));
+    }
+
+    /**
+     * The live disk check trips only when free space is known and below the reserve:
+     * a filesystem with room reports false, and an unmeasurable directory reports
+     * false too (that fetch is bounded by the fixed fallback ceiling instead).
+     *
+     * @return void
+     */
+    public function test_disk_below_reserve(): void {
+        $free = disk_free_space(sys_get_temp_dir());
+        if ($free !== false && $free >= 1073741824) {
+            $this->assertFalse(url_fetcher::disk_below_reserve(sys_get_temp_dir()));
+        } else if ($free !== false) {
+            $this->assertTrue(url_fetcher::disk_below_reserve(sys_get_temp_dir()));
+        }
+        $this->assertFalse(url_fetcher::disk_below_reserve('/nonexistent/' . uniqid()));
     }
 }

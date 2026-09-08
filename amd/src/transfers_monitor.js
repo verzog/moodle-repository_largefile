@@ -24,7 +24,7 @@
  * the tab is hidden, and a transient fetch failure simply waits for the next tick.
  *
  * @module     repository_largefile/transfers_monitor
- * @copyright  2026 SCCA
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
