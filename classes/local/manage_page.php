@@ -49,6 +49,29 @@ class manage_page {
     }
 
     /**
+     * A transfer's status as a colour-coded badge, so the state of a queue reads at a
+     * glance: grey while waiting for cron (Scheduled), blue while cron is working on
+     * it (Running), green when done (Completed), red when it failed, dark when cancelled.
+     *
+     * @param string $status One of the transfer_manager::STATUS_* values.
+     * @return string HTML for the badge.
+     */
+    public static function transfer_status_badge(string $status): string {
+        $classes = [
+            transfer_manager::STATUS_SCHEDULED => 'bg-secondary',
+            transfer_manager::STATUS_RUNNING => 'bg-primary',
+            transfer_manager::STATUS_COMPLETED => 'bg-success',
+            transfer_manager::STATUS_FAILED => 'bg-danger',
+            transfer_manager::STATUS_CANCELLED => 'bg-dark',
+        ];
+        $class = $classes[$status] ?? 'bg-secondary';
+        $label = get_string_manager()->string_exists('transferstatus_' . $status, 'repository_largefile')
+            ? get_string('transferstatus_' . $status, 'repository_largefile')
+            : s($status);
+        return \html_writer::tag('span', $label, ['class' => 'badge ' . $class]);
+    }
+
+    /**
      * What a queued transfer is moving, for the Transfers table: the file name once
      * it is known, otherwise where the file is coming from — a peer share's host, or
      * a URL's file name and host — so a row is never anonymous.

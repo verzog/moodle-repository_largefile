@@ -191,7 +191,7 @@ if ($pending) {
             : '';
         $ptable->data[] = [
             format_string((string) $job->filename),
-            get_string('transferstatus_' . $job->status, 'repository_largefile'),
+            manage_page::transfer_status_badge((string) $job->status),
             $outcome,
             $cancel,
         ];

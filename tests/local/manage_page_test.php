@@ -195,6 +195,26 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * Each transfer status renders as a badge with its own colour class and label, and
+     * an unknown status degrades to a neutral badge rather than an error.
+     *
+     * @return void
+     */
+    public function test_transfer_status_badge(): void {
+        $running = manage_page::transfer_status_badge(transfer_manager::STATUS_RUNNING);
+        $this->assertStringContainsString('badge', $running);
+        $this->assertStringContainsString('bg-primary', $running);
+        $this->assertStringContainsString(get_string('transferstatus_running', 'repository_largefile'), $running);
+        $this->assertStringContainsString('bg-success', manage_page::transfer_status_badge(transfer_manager::STATUS_COMPLETED));
+        $this->assertStringContainsString('bg-danger', manage_page::transfer_status_badge(transfer_manager::STATUS_FAILED));
+        $this->assertStringContainsString('bg-secondary', manage_page::transfer_status_badge(transfer_manager::STATUS_SCHEDULED));
+        $this->assertStringContainsString('bg-dark', manage_page::transfer_status_badge(transfer_manager::STATUS_CANCELLED));
+        $unknown = manage_page::transfer_status_badge('weird');
+        $this->assertStringContainsString('bg-secondary', $unknown);
+        $this->assertStringContainsString('weird', $unknown);
+    }
+
+    /**
      * The Transfers table names what each row is moving: the recorded file name when
      * known, otherwise the share's host or the URL's file name and host, muted.
      *

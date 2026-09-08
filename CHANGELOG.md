@@ -11,6 +11,10 @@ All notable changes to `repository_largefile` are documented here.
   name the moment the peer's metadata is fetched, before the (long) download — and
   until then shows the source instead (the share's host, or the URL's file name and
   host), so a row is never anonymous. No schema change.
+- **Colour-coded statuses with a key.** Transfer statuses are now badges — grey
+  *Scheduled* (waiting for cron), blue *Running*, green *Completed*, red *Failed*,
+  dark *Cancelled* — on the Transfers page and the Backup shares page, and the
+  *Queued transfers* heading carries a one-line key explaining what each means.
 - **Clearer end-of-publish progress, and no duplicate shares after a crash.** Once a
   background publication finishes encrypting, it copies the encrypted file into the
   file store — a step that reports no progress and takes minutes for a large backup —

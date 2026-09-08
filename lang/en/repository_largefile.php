@@ -246,6 +246,9 @@ $string['transfernew'] = 'Queue a new transfer';
 $string['transferoutcome'] = 'Outcome';
 $string['transferprogress'] = 'Progress';
 $string['transferqueue'] = 'Queued transfers';
+$string['transferqueue_desc'] = '{$a->scheduled} is waiting for the next cron run (or its set time). {$a->running} is '
+    . 'being worked on by cron now — the Outcome column shows its progress. {$a->completed} has finished; Outcome names '
+    . 'the result. {$a->failed} stopped with the error shown in Outcome; fix the cause and queue it again.';
 $string['transferqueued'] = 'Transfer queued.';
 $string['transferrate'] = 'avg {$a}/s';
 $string['transferremoved'] = 'Transfer removed.';

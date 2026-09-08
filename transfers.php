@@ -249,6 +249,13 @@ if ($showcompleted) {
 // Queued, running and finished server-side transfers (site-wide).
 $transfers = transfer_manager::list_all();
 echo $OUTPUT->heading(get_string('transferqueue', 'repository_largefile'), 3);
+// A one-line key to the statuses, with the same badges the table uses.
+echo html_writer::tag('p', get_string('transferqueue_desc', 'repository_largefile', (object) [
+    'scheduled' => manage_page::transfer_status_badge(transfer_manager::STATUS_SCHEDULED),
+    'running' => manage_page::transfer_status_badge(transfer_manager::STATUS_RUNNING),
+    'completed' => manage_page::transfer_status_badge(transfer_manager::STATUS_COMPLETED),
+    'failed' => manage_page::transfer_status_badge(transfer_manager::STATUS_FAILED),
+]), ['class' => 'text-muted small']);
 if ($transfers) {
     $typenames = [
         transfer_manager::TYPE_URL => get_string('transfertypeurl', 'repository_largefile'),
@@ -306,7 +313,7 @@ if ($transfers) {
             $typenames[$transfer->type] ?? s($transfer->type),
             manage_page::transfer_file_label($transfer),
             format_string((string) $transfer->username),
-            get_string('transferstatus_' . $transfer->status, 'repository_largefile'),
+            manage_page::transfer_status_badge((string) $transfer->status),
             $when,
             $outcome,
             $actions,
