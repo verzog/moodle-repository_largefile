@@ -87,7 +87,13 @@ class transfer_runner {
             throw new \moodle_exception('errorshareinvalidurl', 'repository_largefile');
         }
         $fetcher = new url_fetcher();
-        $fetched = $fetcher->fetch($url, (int) ($CFG->maxbytes ?? 0));
+        // Label the row with the server's file name as soon as the response headers
+        // arrive (the download itself may run for a long time), then with the final
+        // derived name once it completes.
+        $onname = function (string $name) use ($transfer): void {
+            transfer_manager::set_filename((int) $transfer->id, $name);
+        };
+        $fetched = $fetcher->fetch($url, (int) ($CFG->maxbytes ?? 0), null, null, [], true, $onname);
         transfer_manager::set_filename((int) $transfer->id, (string) $fetched['filename']);
 
         // No recorded choice means "auto": the policy routes to the kind's default

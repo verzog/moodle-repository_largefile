@@ -277,6 +277,19 @@ final class manage_page_test extends \advanced_testcase {
         // A row with neither a name nor a recognisable source shows a dash, never blank.
         $bare = transfer_manager::create(transfer_manager::TYPE_SHARE, 1, [], 0, $system);
         $this->assertSame('—', manage_page::transfer_file_label(transfer_manager::get($bare)));
+
+        // An import completed before names were recorded shows its result (the stored
+        // file name) rather than a guess from its source.
+        $old = transfer_manager::create(
+            transfer_manager::TYPE_URL,
+            1,
+            ['url' => 'https://files.example.org/download?id=9'],
+            0,
+            $system
+        );
+        transfer_manager::claim($old);
+        transfer_manager::mark_completed($old, 'real-name.mbz');
+        $this->assertSame('real-name.mbz', manage_page::transfer_file_label(transfer_manager::get($old)));
     }
 
     /**

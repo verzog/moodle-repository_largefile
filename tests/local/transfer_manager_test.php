@@ -296,5 +296,11 @@ final class transfer_manager_test extends \advanced_testcase {
         $this->assertSame('backup.mbz', transfer_manager::get($id)->filename);
         transfer_manager::set_filename($id, '');
         $this->assertNull(transfer_manager::get($id)->filename);
+
+        // Names are bounded to the column, whether recorded later or at creation.
+        transfer_manager::set_filename($id, str_repeat('n', 300) . '.mbz');
+        $this->assertSame(255, \core_text::strlen(transfer_manager::get($id)->filename));
+        $long = transfer_manager::create(transfer_manager::TYPE_URL, 1, ['url' => 'https://e/x'], 0, 0, str_repeat('m', 300));
+        $this->assertSame(255, \core_text::strlen(transfer_manager::get($long)->filename));
     }
 }

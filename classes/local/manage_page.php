@@ -107,6 +107,12 @@ class manage_page {
         if (!empty($transfer->filename)) {
             return format_string((string) $transfer->filename);
         }
+        // An import completed before names were recorded: its result is the stored
+        // file name, which beats guessing from the source.
+        $isimport = in_array($transfer->type, [transfer_manager::TYPE_URL, transfer_manager::TYPE_SHARE], true);
+        if ($isimport && $transfer->status === transfer_manager::STATUS_COMPLETED && !empty($transfer->result)) {
+            return format_string((string) $transfer->result);
+        }
         $payload = transfer_manager::payload($transfer);
         $source = '';
         if ($transfer->type === transfer_manager::TYPE_SHARE) {

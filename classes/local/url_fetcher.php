@@ -98,6 +98,9 @@ class url_fetcher {
      * @param array $headers Optional extra request headers, each a full "Name: value" line.
      * @param bool $followredirects Whether to follow redirects (default). Pass false for a request that
      *        carries a credential, so it can never be resent to a redirect target; a 3xx then fails.
+     * @param callable|null $onname Optional callback given the file name as soon as the response headers
+     *        reveal it (Content-Disposition, else the effective URL) — while the body is still streaming,
+     *        so a long download can be labelled before it completes.
      * @return array Keys: 'path' (absolute temp path), 'filename', 'contenttype'.
      * @throws \moodle_exception With a repository_largefile error string key.
      */
@@ -107,7 +110,8 @@ class url_fetcher {
         ?callable $iscancelled = null,
         ?object $securityhelper = null,
         array $headers = [],
-        bool $followredirects = true
+        bool $followredirects = true,
+        ?callable $onname = null
     ): array {
         global $CFG;
         require_once($CFG->libdir . '/filelib.php');
@@ -159,12 +163,29 @@ class url_fetcher {
         // on disk; also abort promptly when the caller signals cancellation, so a
         // fetch for a dialogue the user closed does not keep streaming.
         $options['CURLOPT_NOPROGRESS'] = 0;
-        $options['CURLOPT_PROGRESSFUNCTION'] = function ($ch, $dltotal, $dlnow) use ($maxbytes, $iscancelled, $disk) {
+        $named = false;
+        $progress = function ($ch, $dltotal, $dlnow) use ($maxbytes, $iscancelled, $disk, $curl, $onname, $url, &$named) {
             if ($iscancelled !== null && $iscancelled()) {
                 return 1;
             }
             if ($dltotal > $maxbytes || $dlnow > $maxbytes) {
                 return 1;
+            }
+            // Moodle's curl wrapper has parsed the response headers by the time the
+            // body starts arriving, so the server's file name can be reported now
+            // rather than only once the (possibly multi-gigabyte) download finishes.
+            if (!$named && $onname !== null && $dlnow > 0) {
+                $named = true;
+                $raw = $curl->rawresponse ?? '';
+                $name = $this->disposition_filename(is_array($raw) ? implode("\n", $raw) : (string) $raw);
+                if ($name === null || $name === '') {
+                    $effective = (string) (curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $url);
+                    $name = rawurldecode(basename((string) parse_url($effective, PHP_URL_PATH)));
+                }
+                $name = clean_param((string) $name, PARAM_FILE);
+                if ($name !== '') {
+                    $onname($name);
+                }
             }
             // An unlimited fetch shares the disk with every other transfer, so the
             // reserve is enforced live (throttled: a stat every couple of seconds),
@@ -181,6 +202,7 @@ class url_fetcher {
             }
             return 0;
         };
+        $options['CURLOPT_PROGRESSFUNCTION'] = $progress;
         $result = $curl->download_one($url, null, $options);
         fclose($fh);
 
