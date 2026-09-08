@@ -46,7 +46,33 @@ class process_transfers extends \core\task\scheduled_task {
      * recovers a dead job within about an hour rather than leaving it stuck for most
      * of a day.
      */
-    private const LEASE = 1 * HOURSECS;
+    /** @var int Sanity floor for the reclaim lease: shorter than this would risk
+     *   reclaiming a peer download that is still legitimately running. */
+    private const MIN_LEASE = HOURSECS;
+
+    /** @var int Sanity ceiling: past this a died worker takes far too long to be
+     *   returned to the queue. Well within the 7-day retention window. */
+    private const MAX_LEASE = 12 * HOURSECS;
+
+    /** @var int Default reclaim lease when the admin setting is unset (6 hours). */
+    private const DEFAULT_LEASE = 6 * HOURSECS;
+
+    /**
+     * The reclaim lease: a running transfer whose timestarted is older than this is
+     * treated as a died worker and returned to the queue. Read from the plugin's
+     * admin setting, bounded to a sane range so a misconfigured value can neither
+     * reclaim legitimately running peer downloads nor let a truly died worker sit
+     * for days.
+     *
+     * @return int Seconds.
+     */
+    private static function lease_seconds(): int {
+        $seconds = (int) get_config('largefile', 'transferlease');
+        if ($seconds < self::MIN_LEASE) {
+            $seconds = self::DEFAULT_LEASE;
+        }
+        return min($seconds, self::MAX_LEASE);
+    }
 
     /**
      * Task name shown in the admin task list.
@@ -65,7 +91,7 @@ class process_transfers extends \core\task\scheduled_task {
     public function execute(): void {
         // Return any transfer left running by an interrupted earlier run to the
         // queue before picking up new work.
-        transfer_manager::reclaim_stale(time() - self::LEASE);
+        transfer_manager::reclaim_stale(time() - self::lease_seconds());
         $due = transfer_manager::get_due(time(), self::BATCH);
         foreach ($due as $transfer) {
             transfer_runner::run($transfer);

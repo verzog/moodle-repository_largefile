@@ -112,6 +112,12 @@ if (!share_manager::is_valid($share)) {
     $reject(410, get_string('errorshareexpired', 'repository_largefile'));
 }
 
+// Streaming a multi-gigabyte encrypted file may take longer than the web server's
+// max_execution_time; a peer download must not be killed mid-stream by PHP's own
+// clock. The session lock is dropped on the download branch below so a long
+// stream also does not block the caller's other requests.
+\core_php_time_limit::raise();
+
 if ($action === 'meta') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');

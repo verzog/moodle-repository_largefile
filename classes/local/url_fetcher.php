@@ -153,7 +153,16 @@ class url_fetcher {
             'CURLOPT_FOLLOWLOCATION' => $followredirects ? 1 : 0,
             'CURLOPT_MAXREDIRS' => $followredirects ? 5 : 0,
             'CURLOPT_CONNECTTIMEOUT' => 30,
-            'CURLOPT_TIMEOUT' => 600,
+            // Abort on a real stall, not on size: fewer than 1 KB/s sustained for the
+            // configured stall window (default 2 minutes) is dead, not slow. Without
+            // this an import of a many-gigabyte backup over a modest link (or of a big
+            // share between two sites) is killed by a fixed overall timeout even
+            // though it is progressing normally. The size and disk-space caps in the
+            // progress callback still gate real growth, and CURLOPT_TIMEOUT is left as
+            // a very high runaway safety net (24h).
+            'CURLOPT_LOW_SPEED_LIMIT' => 1024,
+            'CURLOPT_LOW_SPEED_TIME' => self::stall_window_seconds(),
+            'CURLOPT_TIMEOUT' => 86400,
             'CURLOPT_SSL_VERIFYPEER' => 1,
             'CURLOPT_SSL_VERIFYHOST' => 2,
             'CURLOPT_USERAGENT' => self::FETCH_USER_AGENT,
@@ -267,6 +276,21 @@ class url_fetcher {
         // A nearly full disk still gets the small fixed ceiling rather than zero or
         // a negative cap, which the caller would read as "unlimited".
         return $ceiling > 0 ? $ceiling : self::DEFAULT_MAXBYTES;
+    }
+
+    /**
+     * How long a fetch may go without progress before it is aborted as stalled, from
+     * the plugin's admin setting (default 2 minutes). Bounded to a sane range so a
+     * misconfigured value can never disable the stall check or set it absurdly high.
+     *
+     * @return int Seconds.
+     */
+    public static function stall_window_seconds(): int {
+        $seconds = (int) get_config('largefile', 'transferstall');
+        if ($seconds < 30) {
+            $seconds = 120;
+        }
+        return min($seconds, 3600);
     }
 
     /**

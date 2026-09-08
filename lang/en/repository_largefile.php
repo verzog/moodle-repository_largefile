@@ -222,6 +222,17 @@ $string['setting:state1duration_help'] = 'How long a partially uploaded file is 
 $string['setting:state2duration'] = 'Keep completed uploads for';
 $string['setting:state2duration_help'] = 'How long a completed upload that was never selected is kept before the cleanup '
     . 'task removes it.';
+$string['setting:transferlease'] = 'Reclaim server transfer after';
+$string['setting:transferlease_help'] = 'A server-side transfer (peer share import, URL import or a backup publish) that '
+    . 'has been running for longer than this is treated by cron as a died worker and returned to the queue. Set this '
+    . 'above the longest transfer you expect to run legitimately — for example, a 20 GB backup over a 15 Mbit link '
+    . 'takes about three hours — so a slow but healthy transfer is not restarted under its own feet. Bounded between '
+    . '1 hour and 12 hours.';
+$string['setting:transferstall'] = 'Stall a peer download after';
+$string['setting:transferstall_help'] = 'A peer share import or URL import is aborted only when it goes this long '
+    . 'without any bytes arriving (below one kilobyte per second). Do not confuse this with the total time the '
+    . 'transfer is allowed to take — a big, slow-but-progressing download is fine. Bounded between 30 seconds and '
+    . 'one hour.';
 $string['settings'] = 'Chunked upload settings';
 $string['sharecreated'] = 'Share created.';
 $string['sharedeleted'] = 'Share revoked.';

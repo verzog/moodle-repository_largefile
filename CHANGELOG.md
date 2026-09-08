@@ -2,6 +2,29 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.3 — 2026-09-08
+
+Long-transfer fixes: peer imports and URL imports of many-gigabyte files were being
+cut off by wall-clock limits that only made sense for small files. No schema change.
+
+- **Fix: long peer-share and URL transfers were killed at ten minutes.** The receiver's
+  cURL fetch used a fixed 600-second overall timeout, which is fine for a small file but
+  cuts a legitimate multi-gigabyte transfer short. The timeout is now stall-based —
+  abort only if the connection goes without any bytes for the configured window
+  (default 2 minutes, admin setting *Stall a peer download after*) — with a 24-hour
+  absolute ceiling as a runaway safety net; size and disk-space are still enforced in
+  the progress callback.
+- **Fix: the sender's share download had no PHP time limit.** Streaming a large
+  encrypted file back to a peer could run into `max_execution_time` on a host that had
+  not raised it, dropping the connection mid-stream. `share.php` now calls
+  `core_php_time_limit::raise()` for the download.
+- **Fix: a running peer import could be reclaimed by cron under its own feet.** The
+  scheduled task treated a transfer still running after one hour as a died worker and
+  put it back on the queue. Legitimate multi-hour imports would be retried mid-run.
+  A new admin setting *Reclaim server transfer after* (default 6 hours, bounded to
+  1–12 hours) is used instead. A worker whose host truly died is still returned to the
+  queue well within the 7-day retention window.
+
 ## 0.7.2 — 2026-09-08
 
 - **Fix: Check connection crashed with "Class curl not found".** On the
