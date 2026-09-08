@@ -2,6 +2,16 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.1 — 2026-09-08
+
+- **The Transfers queue now says what each transfer is moving.** The *Queued
+  transfers* table gains a **File** column. It shows the file name as soon as it is
+  known — a URL import records the URL's file name when queued and the
+  server-supplied name once the download starts; a peer-share import records the
+  name the moment the peer's metadata is fetched, before the (long) download — and
+  until then shows the source instead (the share's host, or the URL's file name and
+  host), so a row is never anonymous. No schema change.
+
 ## 0.7.0 — 2026-09-08
 
 The remaining items from the stability and security review, all implemented as

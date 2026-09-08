@@ -46,10 +46,12 @@ class share_client {
      *
      * @param int $peerid The peer the share came from (whose secret unlocks it).
      * @param string $shareurl The share URL provided by the sending site.
+     * @param callable|null $onmeta Optional callback given the validated metadata array as soon as
+     *        it is fetched, before the download starts (e.g. to record the file name).
      * @return array Keys 'path' (absolute plaintext temp path) and 'filename'.
      * @throws \moodle_exception On any transport, authentication or integrity failure.
      */
-    public static function import(int $peerid, string $shareurl): array {
+    public static function import(int $peerid, string $shareurl, ?callable $onmeta = null): array {
         $secret = peer_manager::get_secret($peerid);
         if ($secret === null) {
             throw new \moodle_exception('errorsharenopeer', 'repository_largefile');
@@ -78,6 +80,9 @@ class share_client {
         $meta = $result['data'];
         if (!self::meta_is_wellformed($meta)) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
+        }
+        if ($onmeta !== null) {
+            $onmeta($meta);
         }
 
         // Redirects are never followed on a signed request: libcurl would resend the

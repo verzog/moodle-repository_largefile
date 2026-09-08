@@ -240,6 +240,7 @@ $string['task:processtransfers'] = 'Run queued large-file transfers';
 $string['tokenexpired'] = 'The upload session has expired. Close and reopen the file picker to start again.';
 $string['transfercancelled'] = 'Transfer cancelled.';
 $string['transfereta'] = 'about {$a} left';
+$string['transferfile'] = 'File';
 $string['transfernew'] = 'Queue a new transfer';
 $string['transferoutcome'] = 'Outcome';
 $string['transferprogress'] = 'Progress';
@@ -253,6 +254,7 @@ $string['transfers_desc'] = 'Queue a server-side file transfer to run unattended
     . 'transfer and chunked upload happening across the site.';
 $string['transferscheduledpast'] = 'Choose a time in the future.';
 $string['transferscheduledtime'] = 'Run at';
+$string['transfersourceshare'] = 'Share from {$a}';
 $string['transferstalled'] = 'no progress for {$a}';
 $string['transferstatus'] = 'Status';
 $string['transferstatus_cancelled'] = 'Cancelled';

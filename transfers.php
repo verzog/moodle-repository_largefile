@@ -169,12 +169,16 @@ if ($data = $form->get_data()) {
             $when
         );
     } else {
+        // Record the URL's file name now so the queue shows what is being fetched;
+        // the runner replaces it with the server-supplied name once the download starts.
+        $urlname = clean_param(rawurldecode(basename((string) parse_url($data->url, PHP_URL_PATH))), PARAM_FILE);
         transfer_manager::create(
             transfer_manager::TYPE_URL,
             (int) $USER->id,
             ['url' => $data->url, 'destination' => $destination, 'targetcourseid' => $targetcourseid],
             $when,
-            $context->id
+            $context->id,
+            $urlname
         );
     }
     redirect($baseurl, get_string('transferqueued', 'repository_largefile'));
@@ -254,6 +258,7 @@ if ($transfers) {
     $table = new html_table();
     $table->head = [
         get_string('transfertype', 'repository_largefile'),
+        get_string('transferfile', 'repository_largefile'),
         get_string('transferuser', 'repository_largefile'),
         get_string('transferstatus', 'repository_largefile'),
         get_string('transferscheduledtime', 'repository_largefile'),
@@ -299,6 +304,7 @@ if ($transfers) {
         }
         $table->data[] = [
             $typenames[$transfer->type] ?? s($transfer->type),
+            manage_page::transfer_file_label($transfer),
             format_string((string) $transfer->username),
             get_string('transferstatus_' . $transfer->status, 'repository_largefile'),
             $when,

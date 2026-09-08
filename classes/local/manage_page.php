@@ -49,6 +49,39 @@ class manage_page {
     }
 
     /**
+     * What a queued transfer is moving, for the Transfers table: the file name once
+     * it is known, otherwise where the file is coming from — a peer share's host, or
+     * a URL's file name and host — so a row is never anonymous.
+     *
+     * @param \stdClass $transfer A transfer row.
+     * @return string HTML for the table cell.
+     */
+    public static function transfer_file_label(\stdClass $transfer): string {
+        if (!empty($transfer->filename)) {
+            return format_string((string) $transfer->filename);
+        }
+        $payload = transfer_manager::payload($transfer);
+        $source = '';
+        if ($transfer->type === transfer_manager::TYPE_SHARE) {
+            $host = (string) parse_url((string) ($payload['shareurl'] ?? ''), PHP_URL_HOST);
+            if ($host !== '') {
+                $source = get_string('transfersourceshare', 'repository_largefile', $host);
+            }
+        } else if ($transfer->type === transfer_manager::TYPE_URL) {
+            $url = (string) ($payload['url'] ?? '');
+            $host = (string) parse_url($url, PHP_URL_HOST);
+            $name = trim(rawurldecode(basename((string) parse_url($url, PHP_URL_PATH))));
+            $source = $name !== '' && $host !== '' ? $name . ' · ' . $host : $name . $host;
+        }
+        if ($source === '') {
+            return '—';
+        }
+        // Not yet the real file name, so shown muted: the runner fills the name in as
+        // soon as the peer's metadata or the URL's response headers reveal it.
+        return \html_writer::tag('span', s($source), ['class' => 'text-muted']);
+    }
+
+    /**
      * A one-line progress summary for a running transfer.
      *
      * Shows the percent and how long it has been running; when the transfer records

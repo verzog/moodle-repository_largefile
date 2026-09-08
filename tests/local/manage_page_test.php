@@ -163,6 +163,49 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * The Transfers table names what each row is moving: the recorded file name when
+     * known, otherwise the share's host or the URL's file name and host, muted.
+     *
+     * @return void
+     */
+    public function test_transfer_file_label(): void {
+        $this->resetAfterTest();
+        $system = \context_system::instance()->id;
+
+        $share = transfer_manager::create(
+            transfer_manager::TYPE_SHARE,
+            1,
+            ['peerid' => 1, 'shareurl' => 'https://learn.example.org/repository/largefile/share.php?token=abc'],
+            0,
+            $system
+        );
+        $label = manage_page::transfer_file_label(transfer_manager::get($share));
+        $this->assertStringContainsString('learn.example.org', $label);
+        $this->assertStringContainsString('text-muted', $label);
+        $this->assertStringNotContainsString('token=abc', $label);
+
+        $url = transfer_manager::create(
+            transfer_manager::TYPE_URL,
+            1,
+            ['url' => 'https://files.example.org/backups/course%20one.mbz?sig=1'],
+            0,
+            $system
+        );
+        $label = manage_page::transfer_file_label(transfer_manager::get($url));
+        $this->assertStringContainsString('course one.mbz', $label);
+        $this->assertStringContainsString('files.example.org', $label);
+        $this->assertStringNotContainsString('sig=1', $label);
+
+        // Once the runner records the real name, that is shown instead.
+        transfer_manager::set_filename($share, 'backup-moodle2-course-1.mbz');
+        $this->assertSame('backup-moodle2-course-1.mbz', manage_page::transfer_file_label(transfer_manager::get($share)));
+
+        // A row with neither a name nor a recognisable source shows a dash, never blank.
+        $bare = transfer_manager::create(transfer_manager::TYPE_SHARE, 1, [], 0, $system);
+        $this->assertSame('—', manage_page::transfer_file_label(transfer_manager::get($bare)));
+    }
+
+    /**
      * The completed-uploads table shows the empty-state notice with none, and lists a
      * completed staged upload with its file and a Remove action targeting it.
      *

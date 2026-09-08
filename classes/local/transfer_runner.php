@@ -88,6 +88,7 @@ class transfer_runner {
         }
         $fetcher = new url_fetcher();
         $fetched = $fetcher->fetch($url, (int) ($CFG->maxbytes ?? 0));
+        transfer_manager::set_filename((int) $transfer->id, (string) $fetched['filename']);
 
         // No recorded choice means "auto": the policy routes to the kind's default
         // enabled destination (for a URL import, historically the large-file picker).
@@ -120,7 +121,11 @@ class transfer_runner {
     private static function run_share_import(\stdClass $transfer, array $payload): string {
         $peerid = (int) ($payload['peerid'] ?? 0);
         $shareurl = (string) ($payload['shareurl'] ?? '');
-        $result = share_client::import($peerid, $shareurl);
+        // Show the file name on the Transfers page as soon as the peer's metadata
+        // reveals it, rather than only after the (possibly long) download.
+        $result = share_client::import($peerid, $shareurl, function (array $meta) use ($transfer): void {
+            transfer_manager::set_filename((int) $transfer->id, clean_param((string) $meta['filename'], PARAM_FILE));
+        });
 
         // No recorded choice means "auto": the policy routes to the kind's default
         // enabled destination (for a peer share, historically the private backup area).

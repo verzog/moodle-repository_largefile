@@ -230,6 +230,20 @@ class transfer_manager {
     }
 
     /**
+     * Record the transfer's file name once it becomes known (a URL import learns it
+     * from the response, a share import from the peer's metadata), so the Transfers
+     * table shows what is being moved while the job is still running.
+     *
+     * @param int $id The transfer id.
+     * @param string $filename The file name; empty clears it.
+     * @return void
+     */
+    public static function set_filename(int $id, string $filename): void {
+        global $DB;
+        $DB->set_field(self::TABLE, 'filename', $filename !== '' ? $filename : null, ['id' => $id]);
+    }
+
+    /**
      * Return transfers stuck in the running state past a lease to the queue.
      *
      * A run interrupted by a worker restart or host shutdown leaves its row
