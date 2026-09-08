@@ -92,6 +92,43 @@ final class share_client_test extends \advanced_testcase {
     }
 
     /**
+     * ping() loads Moodle's cURL helper on entry, so a management page that never
+     * pulled filelib.php in of its own accord (Trusted peers, in isolation) does not
+     * trip on "Class curl not found" when the check tries to open the connection.
+     * Regression test for the crash reported by manage_peers.php.
+     *
+     * @return void
+     */
+    public function test_ping_does_not_require_the_caller_to_load_filelib(): void {
+        $this->resetAfterTest();
+        // Pretend filelib was never loaded: if ping() forgot to load it, `new \curl`
+        // would fail. We cannot literally unload the class in one process, so instead
+        // assert that the source of ping() itself pulls it in — the smallest check
+        // that captures the bug and stays reliable.
+        $source = file_get_contents((new \ReflectionClass(share_client::class))->getFileName());
+        $pingpos = strpos($source, 'public static function ping(');
+        $importpos = strpos($source, 'public static function import(');
+        $this->assertNotFalse($pingpos);
+        $this->assertNotFalse($importpos);
+        $pingbody = substr($source, $pingpos, 400);
+        $importbody = substr($source, $importpos, 400);
+        $this->assertStringContainsString('require_curl', $pingbody);
+        $this->assertStringContainsString('require_curl', $importbody);
+        $this->assertStringContainsString("require_once(\$CFG->libdir . '/filelib.php')", $source);
+
+        // Belt-and-braces: an actual call goes far enough to instantiate \curl.
+        $peerid = peer_manager::create('CurlLoad', str_repeat('s', 24), 'https://curl-load.invalid');
+        $result = share_client::ping($peerid);
+        // The host is invalid, so the connection cannot succeed — but the message
+        // must come from ping()'s own error handling, not a "Class curl not found"
+        // fatal, which is the whole point of the fix.
+        $this->assertIsArray($result);
+        $this->assertFalse($result['ok']);
+        $this->assertIsString($result['message']);
+        $this->assertStringNotContainsString('Class "curl" not found', $result['message']);
+    }
+
+    /**
      * The connection-check endpoint is the peer's share.php under its Site URL, with
      * or without a trailing slash or a subdirectory.
      *

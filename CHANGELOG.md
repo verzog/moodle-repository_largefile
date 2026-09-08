@@ -2,6 +2,15 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.2 — 2026-09-08
+
+- **Fix: Check connection crashed with "Class curl not found".** On the
+  Trusted peers page (reached in isolation from the plugin's configuration
+  page), `share_client::ping()` instantiated Moodle's `\curl` class without
+  first loading `lib/filelib.php`, so a fresh request raised a fatal error
+  instead of running the connection check. Now loaded on entry to every
+  cURL-using method (`ping()` and `import()`), with a regression test.
+
 ## 0.7.1 — 2026-09-08
 
 - **The Transfers queue now says what each transfer is moving.** The *Queued
