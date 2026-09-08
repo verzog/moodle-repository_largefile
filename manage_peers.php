@@ -27,6 +27,7 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\manage_page;
+use repository_largefile\local\share_client;
 use repository_largefile\form\peer_form;
 
 // Repository plugins are not part of the admin settings tree, so this management
@@ -59,6 +60,20 @@ if ($action === 'delete' && $id) {
     exit;
 }
 
+// Live connection check: one signed round trip to the peer's share endpoint. The
+// outcome is shown now and remembered in the listing.
+if ($action === 'check' && $id) {
+    require_sesskey();
+    $result = share_client::ping($id);
+    peer_manager::record_check($id, $result['ok'], $result['message']);
+    redirect(
+        $baseurl,
+        $result['message'],
+        null,
+        $result['ok'] ? \core\output\notification::NOTIFY_SUCCESS : \core\output\notification::NOTIFY_ERROR
+    );
+}
+
 $form = new peer_form($baseurl->out(false), ['id' => $id]);
 if ($id && $action === 'edit') {
     $peer = peer_manager::get($id);
@@ -89,9 +104,14 @@ if ($peers) {
     $table->head = [
         get_string('peername', 'repository_largefile'),
         get_string('peerurl', 'repository_largefile'),
+        get_string('peercheckcol', 'repository_largefile'),
         get_string('actions'),
     ];
     foreach ($peers as $peer) {
+        $check = html_writer::link(
+            new moodle_url($baseurl, ['action' => 'check', 'id' => $peer->id, 'sesskey' => sesskey()]),
+            get_string('peercheck', 'repository_largefile')
+        );
         $edit = html_writer::link(
             new moodle_url($baseurl, ['action' => 'edit', 'id' => $peer->id]),
             get_string('edit')
@@ -100,7 +120,12 @@ if ($peers) {
             new moodle_url($baseurl, ['action' => 'delete', 'id' => $peer->id, 'sesskey' => sesskey()]),
             get_string('delete')
         );
-        $table->data[] = [format_string($peer->name), s((string) $peer->baseurl), "$edit &nbsp; $delete"];
+        $table->data[] = [
+            format_string($peer->name),
+            s((string) $peer->baseurl),
+            manage_page::peer_check_html($peer),
+            "$check &nbsp; $edit &nbsp; $delete",
+        ];
     }
     echo html_writer::table($table);
 } else {

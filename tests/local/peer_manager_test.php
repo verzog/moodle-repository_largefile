@@ -106,6 +106,65 @@ final class peer_manager_test extends \advanced_testcase {
     }
 
     /**
+     * A token-less signed request is attributed to the peer whose secret verifies it;
+     * a stale request with the right secret names the freshness problem; a request
+     * matching no peer is a plain authentication failure.
+     *
+     * @return void
+     */
+    public function test_find_by_signature(): void {
+        $this->resetAfterTest();
+        $secreta = crypto::generate_secret();
+        $secretb = crypto::generate_secret();
+        peer_manager::create('Site A', $secreta, 'https://a.example.org');
+        $b = peer_manager::create('Site B', $secretb, 'https://b.example.org');
+
+        $signed = signer::sign(['action' => 'ping'], $secretb);
+        $match = peer_manager::find_by_signature($signed);
+        $this->assertNotNull($match['peer']);
+        $this->assertSame($b, (int) $match['peer']->id);
+        $this->assertNull($match['error']);
+
+        // The same request cannot be used twice.
+        $this->assertSame('errorsharereplay', peer_manager::find_by_signature($signed)['error']);
+
+        // An unknown secret matches nobody.
+        $stranger = peer_manager::find_by_signature(signer::sign(['action' => 'ping'], crypto::generate_secret()));
+        $this->assertNull($stranger['peer']);
+        $this->assertSame('errorsharesig', $stranger['error']);
+
+        // The right secret but a stale timestamp is reported as stale, not as a bad signature.
+        $stale = signer::sign(['action' => 'ping'], $secreta);
+        $stale['ts'] = (string) (time() - 1000);
+        $compute = new \ReflectionMethod(signer::class, 'compute');
+        $compute->setAccessible(true);
+        $stale['sig'] = $compute->invoke(null, $stale, $secreta);
+        $this->assertSame('errorsharestale', peer_manager::find_by_signature($stale)['error']);
+    }
+
+    /**
+     * record_check stores when a connection check ran, whether it passed and why.
+     *
+     * @return void
+     */
+    public function test_record_check(): void {
+        $this->resetAfterTest();
+        $id = peer_manager::create('Partner', str_repeat('s', 24), 'https://peer.example.org');
+        $this->assertNull(peer_manager::get($id)->lastcheck);
+
+        peer_manager::record_check($id, false, 'Could not connect');
+        $peer = peer_manager::get($id);
+        $this->assertEqualsWithDelta(time(), (int) $peer->lastcheck, 5);
+        $this->assertSame(0, (int) $peer->lastcheckok);
+        $this->assertSame('Could not connect', $peer->lastcheckmessage);
+
+        peer_manager::record_check($id, true, str_repeat('x', 300));
+        $peer = peer_manager::get($id);
+        $this->assertSame(1, (int) $peer->lastcheckok);
+        $this->assertSame(255, \core_text::strlen($peer->lastcheckmessage));
+    }
+
+    /**
      * A peer site URL must be a real URL and use https, unless the site has opted in
      * to insecure peers with the config-only flag.
      *

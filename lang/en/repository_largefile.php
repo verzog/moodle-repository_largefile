@@ -68,6 +68,8 @@ $string['errornocoursechosen'] = 'Choose the course whose backup area the file s
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
 $string['errorpeerinsecureurl'] = 'The peer\'s site URL must use https. Signed download requests and the encrypted backup '
     . 'travel to this address, so a plain http peer is not accepted.';
+$string['errorpeernourl'] = 'This peer has no Site URL, so its connection cannot be checked. Edit the peer and add its '
+    . 'address.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
@@ -140,6 +142,19 @@ $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
 $string['notransfers'] = 'No transfers have been queued yet.';
 $string['nouploadsinprogress'] = 'No uploads are currently in progress.';
+$string['peercheck'] = 'Check connection';
+$string['peercheckbadendpoint'] = 'The address answered, but not as a Large file plugin share endpoint. Check the Site '
+    . 'URL, and that the peer runs release 0.7.1 or later (connection checks need it).';
+$string['peercheckcol'] = 'Connection';
+$string['peerchecked'] = 'checked {$a} ago';
+$string['peercheckfailed'] = 'Failed';
+$string['peerchecknever'] = 'Not checked yet';
+$string['peercheckok'] = 'Connected. The peer recognises this site as "{$a->name}" and runs Large file plugin '
+    . '{$a->release}.';
+$string['peercheckokshort'] = 'Connected';
+$string['peercheckrejected'] = 'The peer refused the check: {$a} Usually the shared secret differs between the two '
+    . 'sites, or their clocks are more than five minutes apart.';
+$string['peercheckunreachable'] = 'Could not connect to the peer: {$a}';
 $string['peerdeleted'] = 'Peer deleted.';
 $string['peername'] = 'Peer name';
 $string['peersaved'] = 'Peer saved.';

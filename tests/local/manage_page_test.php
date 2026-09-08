@@ -195,6 +195,28 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * The Connection cell reads "Not checked yet", "Connected · checked … ago" or
+     * "Failed · checked … ago — reason" from the recorded last check.
+     *
+     * @return void
+     */
+    public function test_peer_check_html(): void {
+        $never = (object) ['lastcheck' => null, 'lastcheckok' => null, 'lastcheckmessage' => null];
+        $nevertext = get_string('peerchecknever', 'repository_largefile');
+        $this->assertStringContainsString($nevertext, manage_page::peer_check_html($never));
+
+        $ok = (object) ['lastcheck' => time() - 60, 'lastcheckok' => 1, 'lastcheckmessage' => 'Connected.'];
+        $html = manage_page::peer_check_html($ok);
+        $this->assertStringContainsString('bg-success', $html);
+        $this->assertStringContainsString('checked', $html);
+
+        $failed = (object) ['lastcheck' => time() - 60, 'lastcheckok' => 0, 'lastcheckmessage' => 'Could not <b>connect</b>'];
+        $html = manage_page::peer_check_html($failed);
+        $this->assertStringContainsString('bg-danger', $html);
+        $this->assertStringContainsString('Could not &lt;b&gt;connect', $html);
+    }
+
+    /**
      * Each transfer status renders as a badge with its own colour class and label, and
      * an unknown status degrades to a neutral badge rather than an error.
      *

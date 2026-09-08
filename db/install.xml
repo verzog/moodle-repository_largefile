@@ -34,6 +34,9 @@
         <FIELD NAME="sharedsecret" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="The pairing secret, encrypted at rest with the site key."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="lastcheck" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="When the connection to this peer was last checked, or null if never."/>
+        <FIELD NAME="lastcheckok" TYPE="int" LENGTH="1" NOTNULL="false" SEQUENCE="false" COMMENT="1 if the last connection check succeeded, 0 if it failed."/>
+        <FIELD NAME="lastcheckmessage" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Human-readable outcome of the last connection check."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

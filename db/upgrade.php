@@ -130,5 +130,23 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090617, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090618) {
+        // Remember the outcome of the last connection check to each trusted peer, so
+        // the Trusted peers page can show whether the pairing works.
+        $table = new xmldb_table('repository_largefile_peers');
+        $fields = [
+            new xmldb_field('lastcheck', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'timemodified'),
+            new xmldb_field('lastcheckok', XMLDB_TYPE_INTEGER, '1', null, null, null, null, 'lastcheck'),
+            new xmldb_field('lastcheckmessage', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'lastcheckok'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026090618, 'repository', 'largefile');
+    }
+
     return true;
 }

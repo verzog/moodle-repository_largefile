@@ -173,6 +173,49 @@ class peer_manager {
     }
 
     /**
+     * Work out which trusted peer signed a request that carries no share token (a
+     * connection check), by trying each peer's secret. A signature that verifies
+     * identifies the peer; a signature that matches a peer but fails its freshness or
+     * single-use check reports that error (so a clock problem is named, not hidden);
+     * a signature matching no peer is a plain authentication failure.
+     *
+     * @param array $params The signed request parameters (including ts, nonce, sig).
+     * @return array Keys 'peer' (the matching row, or null) and 'error' (a lang-string key, or null).
+     */
+    public static function find_by_signature(array $params): array {
+        foreach (self::get_all() as $peer) {
+            $secret = \core\encryption::decrypt($peer->sharedsecret);
+            $error = signer::verify($params, $secret);
+            if ($error === null) {
+                return ['peer' => $peer, 'error' => null];
+            }
+            if ($error !== 'errorsharesig') {
+                // Right secret, but stale or replayed: this is the caller, report why.
+                return ['peer' => null, 'error' => $error];
+            }
+        }
+        return ['peer' => null, 'error' => 'errorsharesig'];
+    }
+
+    /**
+     * Record the outcome of a connection check to a peer.
+     *
+     * @param int $id The peer id.
+     * @param bool $ok Whether the check succeeded.
+     * @param string $message The human-readable outcome (truncated to fit).
+     * @return void
+     */
+    public static function record_check(int $id, bool $ok, string $message): void {
+        global $DB;
+        $DB->update_record(self::TABLE, (object) [
+            'id' => $id,
+            'lastcheck' => time(),
+            'lastcheckok' => $ok ? 1 : 0,
+            'lastcheckmessage' => \core_text::substr($message, 0, 255),
+        ]);
+    }
+
+    /**
      * A menu of peers (id => name) for a select element.
      *
      * @return array id => name.

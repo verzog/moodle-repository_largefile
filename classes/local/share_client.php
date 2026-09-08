@@ -104,6 +104,71 @@ class share_client {
     }
 
     /**
+     * The share endpoint of a peer site, from its registered Site URL.
+     *
+     * @param string $baseurl The peer's site URL (scheme://host[:port][/path]).
+     * @return string The absolute URL of the peer's share.php.
+     */
+    public static function ping_endpoint(string $baseurl): string {
+        return rtrim(trim($baseurl), '/') . '/repository/largefile/share.php';
+    }
+
+    /**
+     * Check the connection to a trusted peer: a signed, token-less request to its
+     * share endpoint that proves, in one round trip, that the peer is reachable over
+     * TLS through this site's outgoing-request policy, runs this plugin, holds the
+     * same shared secret and agrees on the time.
+     *
+     * @param int $peerid The peer to check.
+     * @return array Keys 'ok' (bool) and 'message' (a human-readable outcome).
+     */
+    public static function ping(int $peerid): array {
+        $peer = peer_manager::get($peerid);
+        $secret = peer_manager::get_secret($peerid);
+        if (!$peer || $secret === null) {
+            return ['ok' => false, 'message' => get_string('errorsharenopeer', 'repository_largefile')];
+        }
+        if (empty($peer->baseurl)) {
+            return ['ok' => false, 'message' => get_string('errorpeernourl', 'repository_largefile')];
+        }
+        $security = new peer_curl_security($peer->baseurl);
+        [$url, $headers] = self::signed_request(self::ping_endpoint($peer->baseurl), ['action' => 'ping'], $secret, false);
+        $curl = new \curl(['securityhelper' => $security]);
+        $curl->setHeader('Accept: application/json');
+        foreach ($headers as $header) {
+            $curl->setHeader($header);
+        }
+        $body = $curl->get($url, [], [
+            'CURLOPT_FOLLOWLOCATION' => 0,
+            'CURLOPT_MAXREDIRS' => 0,
+            'CURLOPT_CONNECTTIMEOUT' => 10,
+            'CURLOPT_TIMEOUT' => 20,
+            'CURLOPT_SSL_VERIFYPEER' => 1,
+            'CURLOPT_SSL_VERIFYHOST' => 2,
+            'CURLOPT_USERAGENT' => self::USER_AGENT,
+        ]);
+        if (!empty($curl->errno)) {
+            $detail = trim((string) $curl->error) !== '' ? $curl->error : ('cURL error ' . $curl->errno);
+            return ['ok' => false, 'message' => get_string('peercheckunreachable', 'repository_largefile', $detail)];
+        }
+        if (!self::has_protocol_marker($curl->getResponse())) {
+            return ['ok' => false, 'message' => get_string('peercheckbadendpoint', 'repository_largefile')];
+        }
+        $httpcode = (int) ($curl->info['http_code'] ?? 0);
+        $data = is_string($body) ? json_decode($body, true) : null;
+        if ($httpcode === 200 && is_array($data) && !empty($data['ok'])) {
+            $detail = (object) [
+                'name' => clean_param((string) ($data['peer'] ?? ''), PARAM_TEXT),
+                'release' => clean_param((string) ($data['release'] ?? ''), PARAM_TEXT),
+            ];
+            return ['ok' => true, 'message' => get_string('peercheckok', 'repository_largefile', $detail)];
+        }
+        // A current peer refused the check; its reply is a short plain-text reason.
+        $reason = \core_text::substr(trim(strip_tags((string) $body)), 0, 200);
+        return ['ok' => false, 'message' => get_string('peercheckrejected', 'repository_largefile', $reason)];
+    }
+
+    /**
      * Whether share metadata from a peer has the shape this client relies on: a hex
      * salt of the agreed length, a hex SHA-256 and a usable file name. The response
      * body is not itself signed, so a malformed or hostile reply must fail cleanly

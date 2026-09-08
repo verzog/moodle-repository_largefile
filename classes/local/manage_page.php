@@ -49,6 +49,30 @@ class manage_page {
     }
 
     /**
+     * The outcome of a peer's last connection check as a badge plus detail: green
+     * "Connected" or red "Failed" with when it was checked and, for a failure, why;
+     * grey "Not checked yet" when it never has been.
+     *
+     * @param \stdClass $peer The peer row.
+     * @return string HTML for the table cell.
+     */
+    public static function peer_check_html(\stdClass $peer): string {
+        if (empty($peer->lastcheck)) {
+            $never = get_string('peerchecknever', 'repository_largefile');
+            return \html_writer::tag('span', $never, ['class' => 'badge bg-secondary']);
+        }
+        $ok = !empty($peer->lastcheckok);
+        $badge = \html_writer::tag(
+            'span',
+            get_string($ok ? 'peercheckokshort' : 'peercheckfailed', 'repository_largefile'),
+            ['class' => 'badge ' . ($ok ? 'bg-success' : 'bg-danger')]
+        );
+        $when = get_string('peerchecked', 'repository_largefile', format_time(max(0, time() - (int) $peer->lastcheck)));
+        $detail = $ok ? $when : $when . ' — ' . s((string) $peer->lastcheckmessage);
+        return $badge . ' ' . \html_writer::tag('span', $detail, ['class' => 'text-muted small']);
+    }
+
+    /**
      * A transfer's status as a colour-coded badge, so the state of a queue reads at a
      * glance: grey while waiting for cron (Scheduled), blue while cron is working on
      * it (Running), green when done (Completed), red when it failed, dark when cancelled.

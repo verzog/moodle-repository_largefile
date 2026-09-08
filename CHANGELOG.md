@@ -10,7 +10,17 @@ All notable changes to `repository_largefile` are documented here.
   server-supplied name once the download starts; a peer-share import records the
   name the moment the peer's metadata is fetched, before the (long) download — and
   until then shows the source instead (the share's host, or the URL's file name and
-  host), so a row is never anonymous. No schema change.
+  host), so a row is never anonymous.
+- **Check a trusted peer's connection.** The Trusted peers page gains a
+  **Connection** column and a **Check connection** action. One signed round trip to
+  the peer's share endpoint confirms, at once, that the peer is reachable over TLS
+  through this site's outgoing-request policy, runs this plugin, holds the same
+  shared secret and agrees on the time — and reports which of those failed
+  (unreachable, wrong address or older release, refused: secret or clock). The peer
+  replies with how it knows this site and its plugin release. The outcome and time
+  are remembered on the listing. New `action=ping` on the share endpoint (peer
+  identified by which secret verifies the signature; no share token involved) and
+  three nullable columns on the peers table, added by upgrade.
 - **Colour-coded statuses with a key.** Transfer statuses are now badges — grey
   *Scheduled* (waiting for cron), blue *Running*, green *Completed*, red *Failed*,
   dark *Cancelled* — on the Transfers page and the Backup shares page, and the
