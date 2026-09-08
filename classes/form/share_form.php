@@ -79,7 +79,9 @@ class share_form extends \moodleform {
             ['size' => 6]
         );
         $mform->setType('maxdownloads', PARAM_INT);
-        $mform->setDefault('maxdownloads', 1);
+        // Three, not one: a download is counted when it starts, so a transfer cut off
+        // by a network fault uses one up; a couple of retries must not need re-publishing.
+        $mform->setDefault('maxdownloads', 3);
         $mform->addHelpButton('maxdownloads', 'sharemaxdownloads', 'repository_largefile');
 
         // Encrypting a large backup in the foreground can exceed the web server's

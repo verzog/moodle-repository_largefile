@@ -118,5 +118,17 @@ function xmldb_repository_largefile_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090603, 'repository', 'largefile');
     }
 
+    if ($oldversion < 2026090617) {
+        // Record the chunk size issued with each upload token, so the server-side
+        // chunk cap keeps honouring an upload started before the setting was lowered.
+        $table = new xmldb_table('repository_largefile_chunks');
+        $field = new xmldb_field('chunksize', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'receivedmap');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090617, 'repository', 'largefile');
+    }
+
     return true;
 }

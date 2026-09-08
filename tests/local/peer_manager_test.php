@@ -77,4 +77,49 @@ final class peer_manager_test extends \advanced_testcase {
         $this->resetAfterTest();
         $this->assertNull(peer_manager::get_host(999999));
     }
+
+    /**
+     * Deleting a peer revokes every share published to it (rows and encrypted files),
+     * leaving another peer's shares untouched.
+     *
+     * @return void
+     */
+    public function test_delete_revokes_the_peers_shares(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $gone = peer_manager::create('Gone', str_repeat('s', 24), 'https://gone.example.org');
+        $kept = peer_manager::create('Kept', str_repeat('k', 24), 'https://kept.example.org');
+        $plain = make_request_directory() . '/backup.mbz';
+        file_put_contents($plain, random_bytes(64));
+        $goneshare = share_manager::create($gone, $plain, 'backup.mbz', 0, 0, 2);
+        $keptshare = share_manager::create($kept, $plain, 'backup.mbz', 0, 0, 2);
+
+        peer_manager::delete($gone);
+
+        $this->assertNull(peer_manager::get($gone));
+        $this->assertNull(share_manager::get_by_token($goneshare->token));
+        $this->assertNull(share_manager::get_encrypted_file($goneshare));
+        $this->assertNotNull(share_manager::get_by_token($keptshare->token));
+        $this->assertNotNull(share_manager::get_encrypted_file($keptshare));
+        $this->assertSame(1, $DB->count_records('repository_largefile_shares'));
+    }
+
+    /**
+     * A peer site URL must be a real URL and use https, unless the site has opted in
+     * to insecure peers with the config-only flag.
+     *
+     * @return void
+     */
+    public function test_baseurl_policy(): void {
+        $this->resetAfterTest();
+        $this->assertNull(peer_manager::baseurl_error('https://peer.example.org/moodle'));
+        $this->assertSame('errorpeerbadurl', peer_manager::baseurl_error('peer.example.org'));
+        $this->assertSame('errorpeerbadurl', peer_manager::baseurl_error('ftp://peer.example.org'));
+        $this->assertSame('errorpeerinsecureurl', peer_manager::baseurl_error('http://peer.example.org'));
+
+        set_config('allowinsecurepeers', 1, 'largefile');
+        $this->assertNull(peer_manager::baseurl_error('http://peer.example.org'));
+        $this->assertSame('errorpeerbadurl', peer_manager::baseurl_error('not a url'));
+    }
 }

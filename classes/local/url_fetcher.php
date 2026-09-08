@@ -95,10 +95,20 @@ class url_fetcher {
      * @param object|null $securityhelper Optional cURL security helper; when null the site's default
      *        policy applies (a user-supplied URL stays untrusted), when given it scopes the block, e.g.
      *        to exempt one trusted peer host ({@see peer_curl_security}).
+     * @param array $headers Optional extra request headers, each a full "Name: value" line.
+     * @param bool $followredirects Whether to follow redirects (default). Pass false for a request that
+     *        carries a credential, so it can never be resent to a redirect target; a 3xx then fails.
      * @return array Keys: 'path' (absolute temp path), 'filename', 'contenttype'.
      * @throws \moodle_exception With a repository_largefile error string key.
      */
-    public function fetch(string $url, int $maxbytes, ?callable $iscancelled = null, ?object $securityhelper = null): array {
+    public function fetch(
+        string $url,
+        int $maxbytes,
+        ?callable $iscancelled = null,
+        ?object $securityhelper = null,
+        array $headers = [],
+        bool $followredirects = true
+    ): array {
         global $CFG;
         require_once($CFG->libdir . '/filelib.php');
 
@@ -131,10 +141,13 @@ class url_fetcher {
 
         $curl = new \curl($securityhelper ? ['securityhelper' => $securityhelper] : []);
         $curl->setHeader('Accept: application/octet-stream, */*');
+        foreach ($headers as $header) {
+            $curl->setHeader($header);
+        }
         $options = [
             'CURLOPT_FILE' => $fh,
-            'CURLOPT_FOLLOWLOCATION' => 1,
-            'CURLOPT_MAXREDIRS' => 5,
+            'CURLOPT_FOLLOWLOCATION' => $followredirects ? 1 : 0,
+            'CURLOPT_MAXREDIRS' => $followredirects ? 5 : 0,
             'CURLOPT_CONNECTTIMEOUT' => 30,
             'CURLOPT_TIMEOUT' => 600,
             'CURLOPT_SSL_VERIFYPEER' => 1,
@@ -194,7 +207,7 @@ class url_fetcher {
             @unlink($target);
             throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
         }
-        if ($httpcode >= 400) {
+        if ($httpcode >= 400 || (!$followredirects && $httpcode >= 300)) {
             @unlink($target);
             throw new \moodle_exception('errordownloadhttp', 'repository_largefile', '', $httpcode);
         }

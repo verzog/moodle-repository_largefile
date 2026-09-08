@@ -16,6 +16,7 @@
         <FIELD NAME="length" TYPE="int" LENGTH="15" NOTNULL="false" SEQUENCE="false" COMMENT="Total expected file length in bytes."/>
         <FIELD NAME="currentpos" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Bytes written so far."/>
         <FIELD NAME="receivedmap" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON list of received byte ranges for an out-of-order (Background Fetch) upload."/>
+        <FIELD NAME="chunksize" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Chunk size in bytes issued with this token; the server keeps accepting chunks of this size even if the setting is later lowered."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

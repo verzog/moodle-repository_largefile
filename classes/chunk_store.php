@@ -79,6 +79,7 @@ class chunk_store {
         $record->state = self::STATE_UNUSED;
         $record->currentpos = 0;
         $record->length = 0;
+        $record->chunksize = self::configured_chunk_bytes();
         $record->lastmodified = time();
         $DB->insert_record_raw(self::TABLE, $record, false, false, true);
         return $id;
@@ -112,6 +113,7 @@ class chunk_store {
         $record->state = self::STATE_UNUSED;
         $record->currentpos = 0;
         $record->length = 0;
+        $record->chunksize = self::configured_chunk_bytes();
         $record->lastmodified = time();
         $DB->insert_record_raw(self::TABLE, $record, false, false, true);
         return $id;
@@ -237,6 +239,93 @@ class chunk_store {
     }
 
     /**
+     * The chunk size the admin setting currently asks clients to use, in bytes, with
+     * a 20 MB fallback so a missing or zero setting can never stall the uploader.
+     *
+     * @return int Bytes.
+     */
+    public static function configured_chunk_bytes(): int {
+        $chunkmb = (int) get_config('largefile', 'chunksize');
+        if ($chunkmb <= 0) {
+            $chunkmb = 20;
+        }
+        return $chunkmb * 1024 * 1024;
+    }
+
+    /**
+     * The largest chunk body the endpoint accepts for an upload: twice the larger
+     * of the current setting and the chunk size issued with the upload's token. So
+     * an upload started before an administrator lowered the setting still finishes
+     * (its client keeps sending the size it was issued), while a modified client
+     * cannot post an arbitrarily large body.
+     *
+     * @param \stdClass|null $record The token row, or null for a not-yet-issued token.
+     * @return int Bytes.
+     */
+    public static function max_chunk_bytes(?\stdClass $record = null): int {
+        $issued = $record !== null ? (int) ($record->chunksize ?? 0) : 0;
+        return 2 * max(self::configured_chunk_bytes(), $issued);
+    }
+
+    /**
+     * Spool the raw request body to a temporary stream instead of buffering it in
+     * memory: small bodies stay in memory, anything larger spills to a temp file. At
+     * most $expected + 1 bytes are read, so an oversize body is detected by the
+     * length check without being stored in full.
+     *
+     * @param int $expected The number of bytes the chunk should contain.
+     * @return resource|null A rewound, seekable stream holding the body, or null on failure.
+     */
+    public static function spool_request_body(int $expected) {
+        $in = @fopen('php://input', 'rb');
+        $spool = @fopen('php://temp/maxmemory:2097152', 'w+b');
+        if ($in === false || $spool === false) {
+            return null;
+        }
+        stream_copy_to_stream($in, $spool, max(0, $expected) + 1);
+        fclose($in);
+        rewind($spool);
+        return $spool;
+    }
+
+    /**
+     * The length in bytes of a chunk body given as a string or a seekable stream.
+     *
+     * @param string|resource $content The chunk body.
+     * @return int Bytes, or -1 if it cannot be measured.
+     */
+    private static function body_length($content): int {
+        if (is_string($content)) {
+            return strlen($content);
+        }
+        if (is_resource($content)) {
+            $stat = fstat($content);
+            return is_array($stat) && isset($stat['size']) ? (int) $stat['size'] : -1;
+        }
+        return -1;
+    }
+
+    /**
+     * Write a chunk body (from the given offset within it) to an open file handle
+     * positioned where the bytes belong.
+     *
+     * @param resource $handle The destination file handle, already positioned.
+     * @param string|resource $content The chunk body.
+     * @param int $skip Bytes at the start of the body to skip (already stored).
+     * @return int|false Bytes written, or false on failure.
+     */
+    private static function write_body($handle, $content, int $skip = 0) {
+        if (is_string($content)) {
+            return @fwrite($handle, $skip > 0 ? substr($content, $skip) : $content);
+        }
+        if (!is_resource($content) || @fseek($content, $skip) !== 0) {
+            return false;
+        }
+        $written = @stream_copy_to_stream($content, $handle);
+        return $written === false ? false : (int) $written;
+    }
+
+    /**
      * Write one chunk of an out-of-order upload at its byte offset, recording the
      * range received and completing the upload once every byte has arrived. Safe to
      * call for the same range twice (a Background Fetch retry): the range set is
@@ -246,10 +335,11 @@ class chunk_store {
      * @param \stdClass $record The token row (its length must be set by begin_random()).
      * @param int $start Offset the chunk begins at.
      * @param int $end Offset the chunk ends at (exclusive).
-     * @param string $content The chunk bytes; length must equal end minus start.
+     * @param string|resource $content The chunk bytes (a string or a seekable stream); length must
+     *        equal end minus start.
      * @return array|string An array {complete, currentpos} on success, or an error string.
      */
-    public static function write_range($record, int $start, int $end, string $content) {
+    public static function write_range($record, int $start, int $end, $content) {
         global $DB;
         $length = (int) $record->length;
         if ($length <= 0) {
@@ -258,7 +348,7 @@ class chunk_store {
         if ($start < 0 || $end > $length || $start >= $end) {
             return 'Chunk range is out of bounds.';
         }
-        if (strlen($content) !== $end - $start) {
+        if (self::body_length($content) !== $end - $start) {
             return 'Filechunk is not as long as it should be.';
         }
 
@@ -283,12 +373,12 @@ class chunk_store {
                 return 'Failed to open the upload file.';
             }
             $seeked = @fseek($handle, $start) === 0;
-            $written = $seeked ? @fwrite($handle, $content) : false;
+            $written = $seeked ? self::write_body($handle, $content) : false;
             @fclose($handle);
             if (!$seeked) {
                 return 'Failed to seek in the upload file.';
             }
-            if ($written !== strlen($content)) {
+            if ($written !== $end - $start) {
                 return 'Failed to write chunk to disk.';
             }
             $ranges = self::add_range(json_decode($fresh->receivedmap ?: '[]', true) ?: [], $start, $end);
@@ -449,10 +539,10 @@ class chunk_store {
      * @param int $end Offset the chunk ends at.
      * @param int $length Total declared file length in bytes.
      * @param string $filename The uploaded file's name.
-     * @param string $content The chunk bytes; length must equal end.
+     * @param string|resource $content The chunk bytes (a string or a seekable stream); length must equal end.
      * @return string|null An error message, or null on success.
      */
-    public static function apply_start($record, int $start, int $end, int $length, string $filename, string $content): ?string {
+    public static function apply_start($record, int $start, int $end, int $length, string $filename, $content): ?string {
         global $CFG, $DB;
 
         if ($length <= 0) {
@@ -474,7 +564,7 @@ class chunk_store {
         if ($end > $length) {
             return 'Chunk is longer than specified length';
         }
-        if (strlen($content) !== $end) {
+        if (self::body_length($content) !== $end) {
             return 'Filechunk is not as long as it should be.';
         }
 
@@ -499,8 +589,12 @@ class chunk_store {
             // Only advance the stored position by the bytes actually persisted, so a
             // short write (disk full, quota) can never mark the upload further along
             // than the file really is — which would hand the picker a truncated file.
-            $written = file_put_contents(self::get_path_for_id($record->id), $content);
-            if ($written === false || $written !== strlen($content)) {
+            $handle = @fopen(self::get_path_for_id($record->id), 'wb');
+            $written = $handle === false ? false : self::write_body($handle, $content);
+            if ($handle !== false) {
+                @fclose($handle);
+            }
+            if ($written === false || $written !== $end) {
                 return 'Failed to write chunk to disk.';
             }
 
@@ -528,16 +622,17 @@ class chunk_store {
      * @param \stdClass $record The token row (mutated and saved on success).
      * @param int $start Offset the client believes the chunk begins at.
      * @param int $end Offset the chunk ends at.
-     * @param string $content The chunk bytes; length must equal end - start.
+     * @param string|resource $content The chunk bytes (a string or a seekable stream); length must equal
+     *        end minus start.
      * @return string|null An error message, or null on success.
      */
-    public static function apply_proceed($record, int $start, int $end, string $content): ?string {
+    public static function apply_proceed($record, int $start, int $end, $content): ?string {
         global $DB;
         $error = self::check_bounds($record, $start, $end);
         if ($error !== null) {
             return $error;
         }
-        if (strlen($content) !== $end - $start) {
+        if (self::body_length($content) !== $end - $start) {
             return 'Filechunk is not as long as it should be.';
         }
 
@@ -567,7 +662,7 @@ class chunk_store {
                 if ($handle === false) {
                     return 'Begin of file does not exist on this server.';
                 }
-                $towrite = substr($content, $currentpos - $start);
+                $expected = $end - $currentpos;
                 if (ftruncate($handle, $currentpos) === false || fseek($handle, $currentpos) !== 0) {
                     fclose($handle);
                     return 'Could not position the upload file for writing.';
@@ -577,13 +672,13 @@ class chunk_store {
                 // upload further along than the file really is; the client then
                 // resumes from the true position. Persist that position before
                 // reporting the failure so the resume is accurate.
-                $written = fwrite($handle, $towrite);
+                $written = self::write_body($handle, $content, $currentpos - $start);
                 fclose($handle);
                 if ($written === false) {
                     return 'Failed to write chunk to disk.';
                 }
                 $record->currentpos = $currentpos + $written;
-                if ($written < strlen($towrite)) {
+                if ($written < $expected) {
                     $record->state = self::STATE_STARTED;
                     $record->lastmodified = time();
                     $DB->update_record(self::TABLE, $record);

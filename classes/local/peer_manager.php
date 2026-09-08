@@ -96,14 +96,44 @@ class peer_manager {
     }
 
     /**
-     * Delete a peer.
+     * Delete a peer and every share published to it.
+     *
+     * A share to a deleted peer can never be downloaded again (its secret is gone),
+     * so revoking them here frees their encrypted files at once instead of leaving
+     * unreachable shares — some with no expiry — behind indefinitely.
      *
      * @param int $id The peer id.
      * @return void
      */
     public static function delete(int $id): void {
         global $DB;
+        share_manager::delete_for_peer($id);
         $DB->delete_records(self::TABLE, ['id' => $id]);
+    }
+
+    /**
+     * Why a peer site URL is not acceptable, if it is not.
+     *
+     * The site URL fixes the one origin exempt from the cURL block, so it must be a
+     * real http(s) URL with a host. It must also use https: the signed download and
+     * the ciphertext cross the network to it, and over plain http a signed request
+     * is trivially captured. A site that genuinely needs an http peer (a lab or an
+     * internal network) can set the config-only flag
+     * `allowinsecurepeers` (component `largefile`) to accept http URLs.
+     *
+     * @param string $baseurl The candidate site URL.
+     * @return string|null A lang-string key naming the problem, or null when acceptable.
+     */
+    public static function baseurl_error(string $baseurl): ?string {
+        $baseurl = trim($baseurl);
+        if (!url_fetcher::is_fetchable_url($baseurl)) {
+            return 'errorpeerbadurl';
+        }
+        $scheme = strtolower((string) parse_url($baseurl, PHP_URL_SCHEME));
+        if ($scheme !== 'https' && !get_config('largefile', 'allowinsecurepeers')) {
+            return 'errorpeerinsecureurl';
+        }
+        return null;
     }
 
     /**

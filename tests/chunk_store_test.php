@@ -291,6 +291,78 @@ final class chunk_store_test extends \advanced_testcase {
     }
 
     /**
+     * A chunk body given as a seekable stream (how the endpoint spools a request
+     * body) is written exactly like a string, for the first chunk, a proceed chunk
+     * that partially overlaps stored bytes, and a positional Background Fetch write.
+     *
+     * @return void
+     */
+    public function test_stream_bodies_match_string_bodies(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $data = random_bytes(3000);
+        $stream = function (string $bytes) {
+            $handle = fopen('php://temp', 'w+b');
+            fwrite($handle, $bytes);
+            rewind($handle);
+            return $handle;
+        };
+
+        // Sequential upload: start, then a proceed chunk re-sent from before currentpos.
+        $id = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($id);
+        $this->assertNull(chunk_store::apply_start($record, 0, 1000, 3000, 'video.mp4', $stream(substr($data, 0, 1000))));
+        $record = chunk_store::get_record($id);
+        $this->assertNull(chunk_store::apply_proceed($record, 1000, 2000, $stream(substr($data, 1000, 1000))));
+        // Overlapping retry: bytes 1500-3000, of which 1500-2000 are already stored.
+        $record = chunk_store::get_record($id);
+        $this->assertNull(chunk_store::apply_proceed($record, 1500, 3000, $stream(substr($data, 1500, 1500))));
+        $this->assertTrue(chunk_store::is_complete($id));
+        $this->assertSame($data, file_get_contents(chunk_store::get_path_for_id($id)));
+
+        // Out-of-order upload.
+        $bg = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($bg);
+        $this->assertNull(chunk_store::begin_random($record, 3000, 'video.mp4'));
+        $record = chunk_store::get_record($bg);
+        $this->assertFalse(chunk_store::write_range($record, 2000, 3000, $stream(substr($data, 2000, 1000)))['complete']);
+        $record = chunk_store::get_record($bg);
+        $this->assertTrue(chunk_store::write_range($record, 0, 2000, $stream(substr($data, 0, 2000)))['complete']);
+        $this->assertSame($data, file_get_contents(chunk_store::get_path_for_id($bg)));
+
+        // A stream of the wrong length is refused like a string of the wrong length.
+        $short = chunk_store::create_token(\context_system::instance()->id, -1);
+        $record = chunk_store::get_record($short);
+        $this->assertIsString(chunk_store::apply_start($record, 0, 1000, 3000, 'video.mp4', $stream('too short')));
+    }
+
+    /**
+     * The server-side chunk cap follows the configured chunk size (with headroom for a
+     * resumed upload issued under a larger setting) and falls back to the 20 MB default.
+     *
+     * @return void
+     */
+    public function test_max_chunk_bytes_follows_setting(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        unset_config('chunksize', 'largefile');
+        $this->assertSame(2 * 20 * 1024 * 1024, chunk_store::max_chunk_bytes());
+
+        // A token issued under the 20 MB setting keeps its cap after the setting is
+        // lowered, so an upload in progress can still finish; a new token gets the
+        // lower cap.
+        $old = chunk_store::create_token(\context_system::instance()->id, -1);
+        $this->assertSame(20 * 1024 * 1024, (int) chunk_store::get_record($old)->chunksize);
+        set_config('chunksize', 5, 'largefile');
+        $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes());
+        $this->assertSame(2 * 20 * 1024 * 1024, chunk_store::max_chunk_bytes(chunk_store::get_record($old)));
+        $new = chunk_store::create_token(\context_system::instance()->id, -1);
+        $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes(chunk_store::get_record($new)));
+        // A row from before the column existed falls back to the setting.
+        $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes((object) ['chunksize' => null]));
+    }
+
+    /**
      * write_range rejects an out-of-bounds range and a body that is the wrong length.
      *
      * @return void

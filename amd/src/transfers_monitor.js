@@ -49,8 +49,8 @@ let generation = 0;
 const refresh = async(url, region) => {
     try {
         const response = await fetch(url, {credentials: 'same-origin'});
-        // response.redirected catches an expired-session redirect to the login
-        // page; a non-JSON body (the login page is HTML) fails the parse below.
+        // A redirected response is an expired-session redirect to the login page;
+        // a non-JSON body (the login page is HTML) fails the parse below.
         if (!response.ok || response.redirected) {
             return;
         }

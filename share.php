@@ -40,9 +40,12 @@ use repository_largefile\local\signer;
 
 $token = required_param('token', PARAM_ALPHANUM);
 $action = required_param('action', PARAM_ALPHA);
-$ts = required_param('ts', PARAM_INT);
-$nonce = required_param('nonce', PARAM_ALPHANUM);
-$sig = required_param('sig', PARAM_ALPHANUM);
+
+// Every response — success or rejection — carries the protocol marker, so a
+// receiving site can tell this release (which reads the auth header) apart from an
+// older one whose error page lacks it, and only fall back to query-string signing
+// for the latter.
+header('X-Largefile-Protocol: 2');
 
 // Send a status with a short message and stop. Kept deliberately vague so the
 // endpoint cannot be used to probe for valid tokens.
@@ -53,6 +56,24 @@ $reject = function (int $status, string $message): void {
     echo $message;
     die;
 };
+
+// The timestamp, nonce and signature arrive in the X-Largefile-Auth header (so
+// they are kept out of access logs), or — from a peer running an older release —
+// in the query string. Either way they are verified identically.
+$authheader = trim((string) ($_SERVER['HTTP_X_LARGEFILE_AUTH'] ?? ''));
+if ($authheader !== '') {
+    $auth = signer::parse_auth_header($authheader);
+    if ($auth === null) {
+        $reject(403, get_string('errorsharesig', 'repository_largefile'));
+    }
+    $ts = (int) $auth['ts'];
+    $nonce = clean_param($auth['nonce'], PARAM_ALPHANUM);
+    $sig = clean_param($auth['sig'], PARAM_ALPHANUM);
+} else {
+    $ts = optional_param('ts', 0, PARAM_INT);
+    $nonce = optional_param('nonce', '', PARAM_ALPHANUM);
+    $sig = optional_param('sig', '', PARAM_ALPHANUM);
+}
 
 $share = share_manager::get_by_token($token);
 $secret = $share ? peer_manager::get_secret((int) $share->peerid) : null;
@@ -88,8 +109,12 @@ if ($action === 'download') {
     if (!$file) {
         $reject(404, get_string('errorsharenofile', 'repository_largefile'));
     }
-    // Count the download before streaming so a flaky retry cannot exceed the cap.
-    share_manager::record_download($share);
+    // Count the download before streaming so a flaky retry cannot exceed the cap,
+    // and claim it under a row lock so two simultaneous requests cannot both take
+    // the last download of a capped share.
+    if (!share_manager::claim_download((int) $share->id)) {
+        $reject(410, get_string('errorshareexpired', 'repository_largefile'));
+    }
     \repository_largefile\event\share_downloaded::for_share($share)->trigger();
 
     \core\session\manager::write_close();

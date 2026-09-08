@@ -48,6 +48,9 @@ class signer {
     /** @var string Table holding spent nonces, for replay protection. */
     private const NONCE_TABLE = 'repository_largefile_nonces';
 
+    /** @var string Request header carrying ts/nonce/sig instead of the query string. */
+    public const AUTH_HEADER = 'X-Largefile-Auth';
+
     /**
      * Add ts/nonce/sig to a set of request parameters and return the full set.
      *
@@ -60,6 +63,47 @@ class signer {
         $params['nonce'] = bin2hex(random_bytes(16));
         $params['sig'] = self::compute($params, $secret);
         return $params;
+    }
+
+    /**
+     * Sign a request for header transport: the signed parameters stay in the query
+     * string, while the timestamp, nonce and signature travel in a request header.
+     *
+     * A signed URL is written to web-server, proxy and CDN access logs on both sites,
+     * and logs are the commonest way a credential leaks. Carrying the credential in a
+     * header keeps it out of those logs; the signature itself is computed exactly as
+     * for the query-string form, so the two transports verify identically.
+     *
+     * @param array $params Request parameters (e.g. token, action).
+     * @param string $secret The pairing secret.
+     * @return array Keys 'params' (the unsigned query parameters) and 'header' (the
+     *               full "Name: value" header line to send).
+     */
+    public static function sign_for_header(array $params, string $secret): array {
+        $signed = self::sign($params, $secret);
+        $value = sprintf('ts=%s,nonce=%s,sig=%s', $signed['ts'], $signed['nonce'], $signed['sig']);
+        return ['params' => $params, 'header' => self::AUTH_HEADER . ': ' . $value];
+    }
+
+    /**
+     * Parse the value of the auth header back into its ts/nonce/sig parts.
+     *
+     * @param string $value The header value (e.g. "ts=1700000000,nonce=ab12,sig=cd34").
+     * @return array|null ['ts' => string, 'nonce' => string, 'sig' => string], or null if malformed.
+     */
+    public static function parse_auth_header(string $value): ?array {
+        $parts = [];
+        foreach (explode(',', trim($value)) as $pair) {
+            $pair = trim($pair);
+            if (!preg_match('/^(ts|nonce|sig)=([A-Za-z0-9]+)$/', $pair, $m)) {
+                return null;
+            }
+            $parts[$m[1]] = $m[2];
+        }
+        if (count($parts) !== 3) {
+            return null;
+        }
+        return $parts;
     }
 
     /**

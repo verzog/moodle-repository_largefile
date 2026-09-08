@@ -92,6 +92,43 @@ final class share_client_test extends \advanced_testcase {
     }
 
     /**
+     * The protocol marker is recognised case-insensitively and its absence marks an
+     * endpoint that predates header authentication.
+     *
+     * @return void
+     */
+    public function test_has_protocol_marker(): void {
+        $this->assertTrue(share_client::has_protocol_marker(['X-Largefile-Protocol' => '2']));
+        $this->assertTrue(share_client::has_protocol_marker(['x-largefile-protocol' => '2', 'Content-Type' => 'a']));
+        $this->assertFalse(share_client::has_protocol_marker(['Content-Type' => 'text/html']));
+        $this->assertFalse(share_client::has_protocol_marker([]));
+    }
+
+    /**
+     * The header form keeps the credential out of the URL, the legacy form puts it in
+     * the query string; both carry the same signed parameters.
+     *
+     * @return void
+     */
+    public function test_signed_request_forms(): void {
+        $this->resetAfterTest();
+        $secret = crypto::generate_secret();
+        $params = ['token' => 'abc', 'action' => 'download'];
+
+        [$url, $headers] = share_client::signed_request('https://peer.example.org/share.php', $params, $secret, false);
+        $this->assertSame('https://peer.example.org/share.php?token=abc&action=download', $url);
+        $this->assertCount(1, $headers);
+        $this->assertStringStartsWith(signer::AUTH_HEADER . ': ts=', $headers[0]);
+
+        [$legacyurl, $legacyheaders] = share_client::signed_request('https://peer.example.org/share.php', $params, $secret, true);
+        $this->assertSame([], $legacyheaders);
+        parse_str((string) parse_url($legacyurl, PHP_URL_QUERY), $query);
+        $this->assertSame('abc', $query['token']);
+        $this->assertArrayHasKey('sig', $query);
+        $this->assertNull(signer::verify($query, $secret));
+    }
+
+    /**
      * Share metadata from a peer is accepted only when its salt and SHA-256 are hex of
      * the agreed lengths and its file name is usable, so a malformed or hostile reply
      * fails cleanly instead of reaching key derivation.

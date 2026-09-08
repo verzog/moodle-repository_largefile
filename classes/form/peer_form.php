@@ -67,6 +67,11 @@ class peer_form extends \moodleform {
         $mform->addHelpButton('secret', 'peersecret', 'repository_largefile');
         if (!$editing) {
             $mform->addRule('secret', get_string('required'), 'required', null, 'client');
+            // Offer a strong random secret by default (256 bits, hex), so an administrator
+            // does not have to invent one — a memorable phrase is far easier to brute-force
+            // offline from a captured signed request. The other site pastes this value; or
+            // replace it with the one that site generated.
+            $mform->setDefault('secret', \repository_largefile\local\crypto::generate_secret());
         }
 
         $this->add_action_buttons();
@@ -85,11 +90,13 @@ class peer_form extends \moodleform {
         if (!empty($data['secret']) && strlen(trim($data['secret'])) < 24) {
             $errors['secret'] = get_string('errorsecrettooshort', 'repository_largefile');
         }
-        // The site URL fixes the one host exempt from the cURL block, so it must be
-        // a real http(s) URL with a host (PARAM_URL alone allows a bare path).
+        // The site URL fixes the one host exempt from the cURL block, so it must be a
+        // real https URL with a host (PARAM_URL alone allows a bare path, and http is
+        // refused unless the site opted in — see peer_manager::baseurl_error()).
         $baseurl = trim($data['baseurl'] ?? '');
-        if ($baseurl !== '' && !\repository_largefile\local\url_fetcher::is_fetchable_url($baseurl)) {
-            $errors['baseurl'] = get_string('errorpeerbadurl', 'repository_largefile');
+        $urlerror = $baseurl !== '' ? \repository_largefile\local\peer_manager::baseurl_error($baseurl) : null;
+        if ($urlerror !== null) {
+            $errors['baseurl'] = get_string($urlerror, 'repository_largefile');
         }
         return $errors;
     }
