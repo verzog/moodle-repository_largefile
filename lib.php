@@ -261,7 +261,7 @@ class repository_largefile extends repository {
         $mform->addHelpButton('transferstall', 'setting:transferstall', 'repository_largefile');
 
         $mform->addElement('duration', 'transferlease', get_string('setting:transferlease', 'repository_largefile'));
-        $mform->setDefault('transferlease', 6 * 60 * 60);
+        $mform->setDefault('transferlease', 60 * 60);
         $mform->addHelpButton('transferlease', 'setting:transferlease', 'repository_largefile');
 
         // Import policy: which file kinds are accepted, and where an import may land.

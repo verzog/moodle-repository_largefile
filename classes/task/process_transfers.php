@@ -46,23 +46,28 @@ class process_transfers extends \core\task\scheduled_task {
      * recovers a dead job within about an hour rather than leaving it stuck for most
      * of a day.
      */
-    /** @var int Sanity floor for the reclaim lease: shorter than this would risk
-     *   reclaiming a peer download that is still legitimately running. */
-    private const MIN_LEASE = HOURSECS;
+    /** @var int Sanity floor for the reclaim lease: reclaiming any sooner would
+     *   risk a still-alive worker's row being retried, since a run that has not
+     *   yet updated its progressupdated row is indistinguishable from a died one. */
+    private const MIN_LEASE = 15 * MINSECS;
 
     /** @var int Sanity ceiling: past this a died worker takes far too long to be
      *   returned to the queue. Well within the 7-day retention window. */
     private const MAX_LEASE = 12 * HOURSECS;
 
-    /** @var int Default reclaim lease when the admin setting is unset (6 hours). */
-    private const DEFAULT_LEASE = 6 * HOURSECS;
+    /** @var int Default reclaim lease when the admin setting is unset (1 hour).
+     *  This does not need to exceed the longest legitimate transfer: Moodle's
+     *  scheduled_task lock is held for the whole run of this task, so another cron
+     *  cannot enter reclaim_stale() while a healthy transfer is still going —
+     *  {@see Codex review on PR #28}. It only affects how long a genuinely died
+     *  worker's row sits in "running" before it is retried, so shorter is better. */
+    private const DEFAULT_LEASE = HOURSECS;
 
     /**
-     * The reclaim lease: a running transfer whose timestarted is older than this is
-     * treated as a died worker and returned to the queue. Read from the plugin's
-     * admin setting, bounded to a sane range so a misconfigured value can neither
-     * reclaim legitimately running peer downloads nor let a truly died worker sit
-     * for days.
+     * The reclaim lease: a running transfer whose timestarted is older than this,
+     * *and* whose worker has actually died (this task is not currently running it —
+     * the scheduled-task lock enforces that), is returned to the queue. Read from
+     * the plugin's admin setting, bounded to a sane range.
      *
      * @return int Seconds.
      */

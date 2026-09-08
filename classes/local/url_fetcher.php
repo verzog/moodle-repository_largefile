@@ -224,17 +224,26 @@ class url_fetcher {
         $raw = $curl->rawresponse ?? '';
         $this->lastdispositionname = $this->disposition_filename(is_array($raw) ? implode("\n", $raw) : (string) $raw);
 
-        // CURLE_ABORTED_BY_CALLBACK (42): the progress callback stopped the transfer,
-        // either because the disk ran low or because the body was oversize. Report
-        // which, not a generic failure.
-        if ((int) ($curl->errno ?? 0) === 42) {
+        // Classify the abort so the Transfers page shows an actionable reason:
+        // CURLE_ABORTED_BY_CALLBACK (42) is the progress callback stopping it for an
+        // oversize body or a disk that dropped below the reserve;
+        // CURLE_OPERATION_TIMEDOUT (28) is the low-speed policy — the connection was
+        // silent for the stall window, i.e. a real stall, not just a big file;
+        // anything else is a transport error (TLS, connection reset, DNS, or a 4xx
+        // from the peer that came without a body).
+        $errno = (int) ($curl->errno ?? 0);
+        if ($errno === 42) {
             @unlink($target);
             if ($disk->full) {
                 throw new \moodle_exception('errordownloaddiskfull', 'repository_largefile');
             }
             throw new \moodle_exception('errordownloadtoobig', 'repository_largefile');
         }
-        if ($result !== true || !empty($curl->errno)) {
+        if ($errno === 28) {
+            @unlink($target);
+            throw new \moodle_exception('errordownloadstalled', 'repository_largefile');
+        }
+        if ($result !== true || $errno !== 0) {
             @unlink($target);
             throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
         }

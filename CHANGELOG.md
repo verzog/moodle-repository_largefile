@@ -18,12 +18,17 @@ cut off by wall-clock limits that only made sense for small files. No schema cha
   encrypted file back to a peer could run into `max_execution_time` on a host that had
   not raised it, dropping the connection mid-stream. `share.php` now calls
   `core_php_time_limit::raise()` for the download.
-- **Fix: a running peer import could be reclaimed by cron under its own feet.** The
-  scheduled task treated a transfer still running after one hour as a died worker and
-  put it back on the queue. Legitimate multi-hour imports would be retried mid-run.
-  A new admin setting *Reclaim server transfer after* (default 6 hours, bounded to
-  1–12 hours) is used instead. A worker whose host truly died is still returned to the
-  queue well within the 7-day retention window.
+- **A "Stalled" reason on the Transfers page, split from generic transport failures.**
+  A peer download killed by the low-speed policy (`CURLE_OPERATION_TIMEDOUT`, errno
+  28) now reports *"The transfer stalled: no bytes arrived from the peer for the stall
+  window…"* rather than the same generic *"The file could not be downloaded from
+  that URL."* used for TLS, connection-reset and 4xx failures. Easier to tell a real
+  stall from a real transport error.
+- **New admin setting *Reclaim died transfer after* (`transferlease`).** How long a
+  transfer whose worker actually died (cron killed, host restart) sits in "running"
+  before cron returns it to the queue for another try. Does *not* affect a still-alive
+  transfer — Moodle's scheduled-task lock stops another cron reclaiming a run that is
+  still going — so shorter is better. Default 1 hour, bounded 15 minutes – 12 hours.
 
 ## 0.7.2 — 2026-09-08
 

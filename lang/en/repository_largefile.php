@@ -61,6 +61,7 @@ $string['errordownloaddiskfull'] = 'The download was stopped because the server 
 $string['errordownloadempty'] = 'The URL returned an empty response.';
 $string['errordownloadfailed'] = 'The file could not be downloaded from that URL.';
 $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that URL.';
+$string['errordownloadstalled'] = 'The transfer stalled: no bytes arrived from the peer for the stall window (see the plugin\'s "Stall a peer download after" setting). This is different from a slow but progressing transfer, which is allowed to take as long as needed. Check the peer\'s reachability and its outgoing bandwidth.';
 $string['errordownloadtoobig'] = 'The file at that URL is larger than the site upload limit.';
 $string['erroremptyfile'] = 'The selected file is empty.';
 $string['errornocoursebackupcap'] = 'You do not have permission to add a backup to that course.';
@@ -222,12 +223,11 @@ $string['setting:state1duration_help'] = 'How long a partially uploaded file is 
 $string['setting:state2duration'] = 'Keep completed uploads for';
 $string['setting:state2duration_help'] = 'How long a completed upload that was never selected is kept before the cleanup '
     . 'task removes it.';
-$string['setting:transferlease'] = 'Reclaim server transfer after';
-$string['setting:transferlease_help'] = 'A server-side transfer (peer share import, URL import or a backup publish) that '
-    . 'has been running for longer than this is treated by cron as a died worker and returned to the queue. Set this '
-    . 'above the longest transfer you expect to run legitimately — for example, a 20 GB backup over a 15 Mbit link '
-    . 'takes about three hours — so a slow but healthy transfer is not restarted under its own feet. Bounded between '
-    . '1 hour and 12 hours.';
+$string['setting:transferlease'] = 'Reclaim died transfer after';
+$string['setting:transferlease_help'] = 'How long a server-side transfer whose worker actually died (cron killed, host '
+    . 'restart) sits in "running" before cron returns it to the queue for another try. This does not affect a still-alive '
+    . 'transfer — Moodle\'s task lock stops another cron reclaiming one that is legitimately running — so shorter is '
+    . 'better: it just means faster recovery from a real crash. Default 1 hour, bounded between 15 minutes and 12 hours.';
 $string['setting:transferstall'] = 'Stall a peer download after';
 $string['setting:transferstall_help'] = 'A peer share import or URL import is aborted only when it goes this long '
     . 'without any bytes arriving (below one kilobyte per second). Do not confuse this with the total time the '
