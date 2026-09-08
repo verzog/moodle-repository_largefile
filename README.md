@@ -255,8 +255,10 @@ To reproduce locally, install `moodle-plugin-ci` and run those steps against a
 checkout of this repository.
 
 After editing anything under `amd/src/`, rebuild `amd/build/` with Moodle's own
-toolchain — the plugin has no Gruntfile of its own. From a Moodle checkout that
-contains this plugin at `repository/largefile` and has had `npm ci` run:
+toolchain — the plugin has no Gruntfile of its own. From a **Moodle 5.0**
+(`MOODLE_500_STABLE`) checkout — the release the CI check is pinned to, since each
+Moodle release ships its own ESLint rules and bundler settings — that contains this
+plugin at `repository/largefile` and has had `npm ci` run:
 
 ```
 npx grunt amd --root=repository/largefile

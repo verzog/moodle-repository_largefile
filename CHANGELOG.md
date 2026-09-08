@@ -44,9 +44,11 @@ recommended. No schema change.
   share now go through Moodle's confirmation page (a POSTed continue button), like
   the bulk actions on the Transfers page, rather than an inline `onclick` prompt.
 - **CI verifies the JavaScript build.** A new `amd-build` job rebuilds `amd/build`
-  with Moodle's grunt toolchain and fails on any difference, so a hand-built or
-  stale artefact (the cause of the 0.5.2 breakage) cannot reach `main` again; the
-  built modules are regenerated with that toolchain and the README explains how.
+  with Moodle's grunt toolchain (pinned to Moodle 5.0, the lowest supported release,
+  whose ESLint rules and bundler the committed artefacts are built with) and fails on
+  any difference, so a hand-built or stale artefact (the cause of the 0.5.2 breakage)
+  cannot reach `main` again; the built modules are regenerated with that toolchain
+  and the README explains how.
 
 ## 0.6.6 — 2026-09-07
 
