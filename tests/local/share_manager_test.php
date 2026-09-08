@@ -75,6 +75,33 @@ final class share_manager_test extends \advanced_testcase {
     }
 
     /**
+     * A share whose encrypted file was never stored (a publish attempt that died
+     * mid-store) is removed by delete_unstored(); a stored share with the same peer,
+     * name and publisher is kept.
+     *
+     * @return void
+     */
+    public function test_delete_unstored(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $stored = $this->publish(0, 0);
+        $this->assertTrue(share_manager::is_stored($stored));
+
+        // Simulate the leftover: a second share row for the same peer/name/user whose
+        // file is missing.
+        $orphan = clone $stored;
+        unset($orphan->id);
+        $orphan->token = bin2hex(random_bytes(20));
+        $orphan->id = (int) $DB->insert_record('repository_largefile_shares', $orphan);
+        $this->assertFalse(share_manager::is_stored($orphan));
+
+        $this->assertSame(1, share_manager::delete_unstored((int) $stored->peerid, 'backup.mbz', 2));
+        $this->assertNull(share_manager::get_by_token($orphan->token));
+        $this->assertNotNull(share_manager::get_by_token($stored->token));
+        $this->assertSame(0, share_manager::delete_unstored((int) $stored->peerid, 'backup.mbz', 2));
+    }
+
+    /**
      * Revoking every share of a peer removes their rows and encrypted files only.
      *
      * @return void

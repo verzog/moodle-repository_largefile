@@ -228,6 +228,42 @@ class share_manager {
     }
 
     /**
+     * Whether a share's encrypted file has been stored. A share is recorded before
+     * its (possibly multi-gigabyte) ciphertext is copied into the file store, so for
+     * a few minutes a legitimate share has no file yet; one whose publish attempt
+     * died mid-store never gets one.
+     *
+     * @param \stdClass $share The share row.
+     * @return bool
+     */
+    public static function is_stored(\stdClass $share): bool {
+        return self::get_encrypted_file($share) !== null;
+    }
+
+    /**
+     * Delete shares for a peer, file name and publisher that have no stored encrypted
+     * file — the leftovers of a publish attempt that died between recording the share
+     * and storing the file. Called before a retry so it cannot leave a duplicate.
+     *
+     * @param int $peerid The target peer.
+     * @param string $filename The published file name.
+     * @param int $userid The publishing user.
+     * @return int How many file-less shares were removed.
+     */
+    public static function delete_unstored(int $peerid, string $filename, int $userid): int {
+        global $DB;
+        $shares = $DB->get_records(self::TABLE, ['peerid' => $peerid, 'filename' => $filename, 'userid' => $userid]);
+        $removed = 0;
+        foreach ($shares as $share) {
+            if (!self::is_stored($share)) {
+                self::delete((int) $share->id);
+                $removed++;
+            }
+        }
+        return $removed;
+    }
+
+    /**
      * Atomically record a successful download.
      *
      * @param \stdClass $share The share row.

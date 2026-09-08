@@ -188,13 +188,22 @@ class transfer_runner {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
 
+        // A previous attempt at this publication may have died between recording the
+        // share and storing its encrypted file (the lease then returns the job here).
+        // Such a share can never be downloaded, so remove it rather than leave a
+        // duplicate, file-less entry beside the one this attempt creates.
+        share_manager::delete_unstored($peerid, $file->get_filename(), (int) $transfer->userid);
+
         // Encrypt straight from the staged stored file (no plaintext temp copy) and
         // report progress on the transfer row, throttled to at most once a second so
-        // a long encryption stays observable without hammering the database.
+        // a long encryption stays observable without hammering the database. The
+        // final update (100%) is never throttled away: it tells the Transfers page
+        // that encryption is over and the encrypted file is now being stored — a
+        // step that reports no progress of its own and can take minutes.
         $lastupdate = 0;
         $onprogress = function (int $done, int $total) use ($transfer, &$lastupdate): void {
             $now = time();
-            if ($total > 0 && $now !== $lastupdate) {
+            if ($total > 0 && ($now !== $lastupdate || $done >= $total)) {
                 $lastupdate = $now;
                 transfer_manager::set_progress((int) $transfer->id, (int) floor($done * 100 / $total));
             }

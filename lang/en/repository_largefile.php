@@ -224,6 +224,7 @@ $string['sharemaxdownloads'] = 'Maximum downloads';
 $string['sharemaxdownloads_help'] = 'How many times the share may be downloaded before it stops working. Use 0 for no '
     . 'limit. A download counts from the moment it starts, so one cut off by a network fault still uses up an attempt; '
     . 'the default of 3 leaves room for a retry or two without leaving the share open indefinitely.';
+$string['sharenotstored'] = 'file not yet stored';
 $string['sharepeer'] = 'Share with peer';
 $string['sharepublishbackground'] = 'Create in the background';
 $string['sharepublishbackground_help'] = 'Recommended for large backups. The backup is encrypted on the server rather '
@@ -262,6 +263,7 @@ $string['transferstatus_completed'] = 'Completed';
 $string['transferstatus_failed'] = 'Failed';
 $string['transferstatus_running'] = 'Running';
 $string['transferstatus_scheduled'] = 'Scheduled';
+$string['transferstoring'] = 'encrypted, storing the file';
 $string['transfertype'] = 'Type';
 $string['transfertypepublish'] = 'Backup share (publish)';
 $string['transfertypeshare'] = 'Peer share import';

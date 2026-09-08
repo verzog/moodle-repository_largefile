@@ -88,6 +88,38 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * At 100% the encryption is done and the encrypted file is being stored, a step
+     * that reports no progress: the readout says so rather than flagging a stall or
+     * inventing a rate and ETA.
+     *
+     * @return void
+     */
+    public function test_running_progress_reports_storing_at_100_percent(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            1,
+            ['peerid' => 1, 'filesize' => 100 * 1024 * 1024],
+            0,
+            \context_system::instance()->id,
+            'backup.mbz'
+        );
+        transfer_manager::claim($id);
+        $DB->set_field(transfer_manager::TABLE, 'timestarted', time() - 600, ['id' => $id]);
+        transfer_manager::set_progress($id, 100);
+        $DB->set_field(transfer_manager::TABLE, 'progressupdated', time() - 300, ['id' => $id]);
+
+        $summary = manage_page::running_progress(transfer_manager::get($id));
+
+        $this->assertStringContainsString('100%', $summary);
+        $this->assertStringContainsString(get_string('transferstoring', 'repository_largefile'), $summary);
+        $this->assertStringNotContainsString('no progress for', $summary);
+        $this->assertStringNotContainsString('/s', $summary);
+        $this->assertStringContainsString('running for', $summary);
+    }
+
+    /**
      * Without a recorded size (or before any progress) only the percent shows, so
      * the readout never divides by zero or invents a rate.
      *

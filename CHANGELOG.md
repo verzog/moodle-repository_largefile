@@ -11,6 +11,15 @@ All notable changes to `repository_largefile` are documented here.
   name the moment the peer's metadata is fetched, before the (long) download — and
   until then shows the source instead (the share's host, or the URL's file name and
   host), so a row is never anonymous. No schema change.
+- **Clearer end-of-publish progress, and no duplicate shares after a crash.** Once a
+  background publication finishes encrypting, it copies the encrypted file into the
+  file store — a step that reports no progress and takes minutes for a large backup —
+  and the Transfers page used to show that as "99% · no progress for …". It now reads
+  *100% · encrypted, storing the file*. On the Backup shares page a share whose file
+  is not yet stored is badged *file not yet stored* (a running publication, or one
+  that died mid-store and should be revoked), and a retried publication first removes
+  any such file-less leftover for the same backup, so a crash can no longer leave a
+  duplicate share beside the good one.
 
 ## 0.7.0 — 2026-09-08
 

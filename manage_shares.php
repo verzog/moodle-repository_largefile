@@ -223,8 +223,18 @@ if ($shares) {
             new moodle_url($baseurl, ['action' => 'revoke', 'id' => $share->id, 'sesskey' => sesskey()]),
             get_string('revokeshare', 'repository_largefile')
         );
+        $filecell = format_string($share->filename);
+        if (!share_manager::is_stored($share)) {
+            // Either still being stored by a running publication, or left by one that
+            // died mid-store (then it never will be; revoke it).
+            $filecell .= ' ' . html_writer::tag(
+                'span',
+                get_string('sharenotstored', 'repository_largefile'),
+                ['class' => 'badge bg-warning text-dark']
+            );
+        }
         $table->data[] = [
-            format_string($share->filename),
+            $filecell,
             format_string($share->peername ?? ''),
             html_writer::tag('code', s($link), ['class' => 'text-break']),
             $expiry,

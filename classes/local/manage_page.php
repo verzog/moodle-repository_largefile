@@ -108,7 +108,12 @@ class manage_page {
         $sincestep = $lastadvance ? $now - $lastadvance : 0;
         $stalled = $percent > 0 && $percent < 100 && $sincestep > max(120, (int) (3 * $stepaverage));
 
-        if ($stalled) {
+        if ($percent >= 100) {
+            // Encryption is finished; the encrypted file is being copied into the file
+            // store, a step that reports no progress and takes minutes for a large
+            // backup. Say so instead of leaving a frozen percentage.
+            $parts[] = get_string('transferstoring', 'repository_largefile');
+        } else if ($stalled) {
             $parts[] = get_string('transferstalled', 'repository_largefile', format_time($sincestep));
         } else if ($total > 0 && $percent > 0 && $elapsed > 0) {
             $done = (int) ($total * $percent / 100);
