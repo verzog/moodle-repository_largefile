@@ -47,8 +47,10 @@ recommended. No schema change.
   with Moodle's grunt toolchain (pinned to Moodle 5.0, the lowest supported release,
   whose ESLint rules and bundler the committed artefacts are built with) and fails on
   any difference, so a hand-built or stale artefact (the cause of the 0.5.2 breakage)
-  cannot reach `main` again; the built modules are regenerated with that toolchain
-  and the README explains how.
+  cannot reach `main` again; the built modules are regenerated with that toolchain,
+  the source made clean under Moodle's ESLint rules (a line-length error and five
+  warnings — nested promise, block depth, handler complexity — refactored away with no
+  behaviour change), and the README explains how to rebuild.
 
 ## 0.6.6 — 2026-09-07
 

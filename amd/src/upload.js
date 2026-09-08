@@ -129,11 +129,21 @@ const ensureSwMessageListener = () => {
  */
 const getServiceWorker = () => {
     if (swRegistrationPromise === null) {
-        const scope = config.wwwroot + '/repository/largefile/';
-        swRegistrationPromise = navigator.serviceWorker.register(scope + 'sw.js', {scope})
-            .then((registration) => waitForActive(registration).then(() => registration));
+        swRegistrationPromise = registerServiceWorker(config.wwwroot + '/repository/largefile/');
     }
     return swRegistrationPromise;
+};
+
+/**
+ * Register the service worker at the given scope and wait until it is active.
+ *
+ * @param {string} scope The scope URL (the plugin directory).
+ * @return {Promise} Resolves with the active ServiceWorkerRegistration.
+ */
+const registerServiceWorker = async(scope) => {
+    const registration = await navigator.serviceWorker.register(scope + 'sw.js', {scope});
+    await waitForActive(registration);
+    return registration;
 };
 
 /**
@@ -568,46 +578,63 @@ const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, control
         const gapEnd = snap.missing[g][1];
         for (let start = gapStart; start < gapEnd; start += chunkSize) {
             const end = Math.min(start + chunkSize, gapEnd);
-            let retries = 0;
-            for (;;) {
-                if (controller.cancelled) {
-                    return false;
-                }
-                const slice = file.slice(start, end);
-                const base = confirmed;
-                const result = await postRequest({action: 'bgchunk', id: token, start: start, end: end},
-                    slice, 'application/octet-stream', (loaded) => onProgress(base + loaded, file.size), controller);
-                if (controller.cancelled) {
-                    return false;
-                }
-                if (result.status === 200) {
-                    const response = parseJson(result.text);
-                    if (response !== null && response.error !== undefined) {
-                        throw new Error(response.error);
-                    }
-                    // Only a well-formed success advances the range; a 200 with an
-                    // empty or unparseable body (a proxy page, a connection cut after
-                    // the headers) is treated as transient and retried — never counted
-                    // as delivered, which would let the loop finish while the server
-                    // still lacks this chunk.
-                    if (response !== null) {
-                        confirmed += end - start;
-                        onProgress(confirmed, file.size);
-                        break;
-                    }
-                } else if (isTerminal(result.status)) {
-                    const key = result.status === 413 ? 'errorchunktoolarge' : 'erroruploadfailed';
-                    throw new Error(await getString(key, 'repository_largefile'));
-                }
-                if (retries >= MAX_RETRIES) {
-                    throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
-                }
-                retries++;
-                await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, retries - 1), BACKOFF_CAP_MS));
+            const base = confirmed;
+            const delivered = await uploadRangeChunk(file, token, start, end,
+                (loaded) => onProgress(base + loaded, file.size), controller);
+            if (!delivered) {
+                return false;
             }
+            confirmed += end - start;
+            onProgress(confirmed, file.size);
         }
     }
     return true;
+};
+
+/**
+ * Upload one byte range of a Background Fetch upload at its own offset, retrying
+ * transient failures with the usual backoff. Only a well-formed success counts as
+ * delivered: a 200 with an empty or unparseable body (a proxy page, a connection cut
+ * after the headers) is treated as transient and retried, never counted — otherwise
+ * the caller could finish while the server still lacks this chunk.
+ *
+ * @param {File} file The file being resumed.
+ * @param {string} token The upload token id.
+ * @param {number} start Offset the chunk begins at.
+ * @param {number} end Offset the chunk ends at (exclusive).
+ * @param {function} onLoaded Callback given the bytes of this chunk uploaded so far.
+ * @param {object} controller The {cancelled, xhr} abort controller.
+ * @return {Promise} Resolves true once delivered, false if cancelled; rejects on a terminal error.
+ */
+const uploadRangeChunk = async(file, token, start, end, onLoaded, controller) => {
+    let retries = 0;
+    for (;;) {
+        if (controller.cancelled) {
+            return false;
+        }
+        const result = await postRequest({action: 'bgchunk', id: token, start: start, end: end},
+            file.slice(start, end), 'application/octet-stream', onLoaded, controller);
+        if (controller.cancelled) {
+            return false;
+        }
+        if (result.status === 200) {
+            const response = parseJson(result.text);
+            if (response !== null && response.error !== undefined) {
+                throw new Error(response.error);
+            }
+            if (response !== null) {
+                return true;
+            }
+        } else if (isTerminal(result.status)) {
+            const key = result.status === 413 ? 'errorchunktoolarge' : 'erroruploadfailed';
+            throw new Error(await getString(key, 'repository_largefile'));
+        }
+        if (retries >= MAX_RETRIES) {
+            throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+        }
+        retries++;
+        await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, retries - 1), BACKOFF_CAP_MS));
+    }
 };
 
 /**
@@ -864,6 +891,122 @@ const openUploadModal = async(data) => {
         modal.destroy();
     });
 
+    /**
+     * Commit the URL tab: allocate a token and have the server fetch the URL into it.
+     *
+     * @return {Promise} Resolves true when staged, false when cancelled, or null when no URL was entered.
+     */
+    const importFromUrl = async() => {
+        const urlInput = el('[data-region="urlinput"]');
+        const url = urlInput ? urlInput.value.trim() : '';
+        if (!url) {
+            return null;
+        }
+        setStatus(await getString('uploading', 'repository_largefile'));
+        const token = await newToken(data.contextId, controller);
+        controller.token = token.id;
+        return fetchUrl(url, token.id, controller);
+    };
+
+    /**
+     * Hand the selected file to Background Fetch: it keeps running after the page
+     * closes, so this dialogue's job is done once it is registered.
+     *
+     * @param {File} file The file to upload.
+     * @return {Promise} Resolves once the handoff is complete and the dialogue closed.
+     */
+    const handOffToBackground = async(file) => {
+        const bgtoken = await newToken(data.contextId, controller);
+        if (bgtoken.maxbytes > 0 && file.size > bgtoken.maxbytes) {
+            throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
+        }
+        // Track the token from now, so if service-worker registration or the fetch
+        // handoff fails (or the user cancels during setup) the catch or abort deletes
+        // its pre-sized file rather than orphaning it.
+        controller.token = bgtoken.id;
+        setStatus(await getString('bgstarting', 'repository_largefile'));
+        await startBackgroundUpload(file, bgtoken);
+        // Handoff succeeded: the browser owns the upload now. Refresh the picker when
+        // it completes (a module-level listener, since this dialogue will be gone).
+        ensureSwMessageListener();
+        bgCompletionCallbacks.push(data.callback);
+        backgroundHandedOff = true;
+        controller.token = null;
+        // Remember it in the background store (keyed by token, not the per-context
+        // foreground slot) so that, if it stalls — the browser fails the whole fetch
+        // when any one chunk fails — the owner can re-select the same file and finish
+        // the missing ranges rather than starting over. Kept out of the dialogue-owned
+        // foreground slot so that opening and closing the dialogue never deletes a
+        // running upload, and several background uploads can be in flight at once.
+        // Cleared automatically once the server reports it complete.
+        writeBgRecord(bgtoken.id, {
+            contextId: data.contextId,
+            filename: file.name,
+            size: file.size,
+            chunksize: bgtoken.chunksize,
+            fingerprint: await fingerprintFile(file),
+        });
+        modal.hide();
+        const notice = await Promise.all([
+            getString('pluginname', 'repository_largefile'),
+            getString('bgstarted', 'repository_largefile'),
+            getString('ok', 'core'),
+        ]);
+        Notification.alert(notice[0], notice[1], notice[2]);
+    };
+
+    /**
+     * Upload the selected file from this page: continue a matching unfinished upload
+     * (a foreground one from its offset, a stalled background one by its missing
+     * ranges) or start a fresh chunked upload.
+     *
+     * @param {File} file The file to upload.
+     * @param {boolean} resuming Whether pendingResume matches this file and should be continued.
+     * @param {object} run Shared run state; `backgroundResume` is set here before any bytes
+     *        are sent so the caller's failure path can tell the two resume kinds apart.
+     * @return {Promise} Resolves true when staged, false when cancelled; rejects on failure.
+     */
+    const uploadInForeground = async(file, resuming, run) => {
+        let tokenId;
+        let chunkSize;
+        let resumeFrom = 0;
+        // A stalled Background Fetch upload is finished by its missing ranges, not by a
+        // sequential offset, so it takes a different resume path.
+        run.backgroundResume = resuming && pendingResume.background === true;
+        if (resuming) {
+            // Carry on with the existing server-side token from where it stopped.
+            tokenId = pendingResume.token;
+            chunkSize = pendingResume.chunksize;
+            resumeFrom = pendingResume.currentpos;
+        } else {
+            const token = await newToken(data.contextId, controller);
+            if (token.maxbytes > 0 && file.size > token.maxbytes) {
+                throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
+            }
+            tokenId = token.id;
+            chunkSize = token.chunksize;
+        }
+        controller.token = tokenId;
+        // Remember this upload so it can be resumed if the page is left before it
+        // finishes (the server keeps the partial file and its position); the
+        // fingerprint lets a resume confirm the re-selected file is the same one. A
+        // background resume keeps its record in the background store (so a further
+        // interruption still finishes by missing ranges); every other upload uses the
+        // per-context foreground slot.
+        const fingerprint = resuming ? pendingResume.fingerprint : await fingerprintFile(file);
+        const record = {filename: file.name, size: file.size, chunksize: chunkSize, fingerprint: fingerprint};
+        if (run.backgroundResume) {
+            writeBgRecord(tokenId, Object.assign({contextId: data.contextId}, record));
+        } else {
+            writeResume(data.contextId, Object.assign({token: tokenId}, record));
+        }
+        hideResume();
+        setStatus(await getString('uploading', 'repository_largefile'));
+        return run.backgroundResume
+            ? resumeBackgroundUpload(file, tokenId, chunkSize, setProgress, controller)
+            : uploadFileChunked(file, tokenId, chunkSize, setProgress, controller, resumeFrom);
+    };
+
     root.on(ModalEvents.save, async(e) => {
         e.preventDefault();
         if (busy) {
@@ -871,24 +1014,19 @@ const openUploadModal = async(data) => {
         }
         // The active tab decides which source we commit.
         const urlTabActive = root.find('[data-region="tab-url"]').hasClass('active');
-        // A stalled Background Fetch upload is finished by its missing ranges, not a
-        // sequential offset. Tracked out here so the success and failure paths treat
-        // its recovery record and its token correctly (kept on failure, not deleted).
-        let backgroundResume = false;
+        // Whether this run is finishing a stalled Background Fetch upload: the success
+        // and failure paths treat its recovery record and token differently (kept on
+        // failure, not deleted). Set by uploadInForeground() before any bytes are sent.
+        const run = {backgroundResume: false};
         try {
             busy = true;
             let staged;
             if (urlTabActive) {
-                const urlInput = el('[data-region="urlinput"]');
-                const url = urlInput ? urlInput.value.trim() : '';
-                if (!url) {
+                staged = await importFromUrl();
+                if (staged === null) {
                     busy = false;
                     return;
                 }
-                setStatus(await getString('uploading', 'repository_largefile'));
-                const token = await newToken(data.contextId, controller);
-                controller.token = token.id;
-                staged = await fetchUrl(url, token.id, controller);
             } else {
                 if (!selectedFile) {
                     busy = false;
@@ -899,103 +1037,15 @@ const openUploadModal = async(data) => {
                     // report a false success, so reject it up front.
                     throw new Error(await getString('erroremptyfile', 'repository_largefile'));
                 }
-                let tokenId;
-                let chunkSize;
-                let resumeFrom = 0;
                 const resuming = resumeActive && pendingResume
                     && selectedFile.name === pendingResume.filename
                     && selectedFile.size === pendingResume.size;
                 const bgCheck = el('[data-region="bgcheck"]');
                 if (BG_SUPPORTED && bgCheck && bgCheck.checked && !resuming) {
-                    // Hand the upload to Background Fetch: it keeps running after the
-                    // page closes, so this dialogue's job is done once it is registered.
-                    const bgtoken = await newToken(data.contextId, controller);
-                    if (bgtoken.maxbytes > 0 && selectedFile.size > bgtoken.maxbytes) {
-                        throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
-                    }
-                    // Track the token from now, so if service-worker registration or the
-                    // fetch handoff fails (or the user cancels during setup) the catch or
-                    // abort deletes its pre-sized file rather than orphaning it.
-                    controller.token = bgtoken.id;
-                    setStatus(await getString('bgstarting', 'repository_largefile'));
-                    await startBackgroundUpload(selectedFile, bgtoken);
-                    // Handoff succeeded: the browser owns the upload now. Refresh the
-                    // picker when it completes (a module-level listener, since this
-                    // dialogue will be gone by then).
-                    ensureSwMessageListener();
-                    bgCompletionCallbacks.push(data.callback);
-                    backgroundHandedOff = true;
-                    controller.token = null;
-                    // Remember it in the background store (keyed by token, not the
-                    // per-context foreground slot) so that, if it stalls — the browser
-                    // fails the whole fetch when any one chunk fails — the owner can
-                    // re-select the same file and finish the missing ranges rather than
-                    // starting over. Kept out of the dialogue-owned foreground slot so
-                    // that opening and closing the dialogue never deletes a running
-                    // upload, and several background uploads can be in flight at once.
-                    // Cleared automatically once the server reports it complete.
-                    writeBgRecord(bgtoken.id, {
-                        contextId: data.contextId,
-                        filename: selectedFile.name,
-                        size: selectedFile.size,
-                        chunksize: bgtoken.chunksize,
-                        fingerprint: await fingerprintFile(selectedFile),
-                    });
-                    modal.hide();
-                    const notice = await Promise.all([
-                        getString('pluginname', 'repository_largefile'),
-                        getString('bgstarted', 'repository_largefile'),
-                        getString('ok', 'core'),
-                    ]);
-                    Notification.alert(notice[0], notice[1], notice[2]);
+                    await handOffToBackground(selectedFile);
                     return;
                 }
-                // A stalled Background Fetch upload is finished by its missing ranges,
-                // not by a sequential offset, so it takes a different resume path.
-                backgroundResume = resuming && pendingResume.background === true;
-                if (resuming) {
-                    // Carry on with the existing server-side token from where it stopped.
-                    tokenId = pendingResume.token;
-                    chunkSize = pendingResume.chunksize;
-                    resumeFrom = pendingResume.currentpos;
-                } else {
-                    const token = await newToken(data.contextId, controller);
-                    if (token.maxbytes > 0 && selectedFile.size > token.maxbytes) {
-                        throw new Error(await getString('errordownloadtoobig', 'repository_largefile'));
-                    }
-                    tokenId = token.id;
-                    chunkSize = token.chunksize;
-                }
-                controller.token = tokenId;
-                // Remember this upload so it can be resumed if the page is left before
-                // it finishes (the server keeps the partial file and its position); the
-                // fingerprint lets a resume confirm the re-selected file is the same one.
-                // A background resume keeps its record in the background store (so a
-                // further interruption still finishes by missing ranges); every other
-                // upload uses the per-context foreground slot.
-                const fingerprint = resuming ? pendingResume.fingerprint : await fingerprintFile(selectedFile);
-                if (backgroundResume) {
-                    writeBgRecord(tokenId, {
-                        contextId: data.contextId,
-                        filename: selectedFile.name,
-                        size: selectedFile.size,
-                        chunksize: chunkSize,
-                        fingerprint: fingerprint,
-                    });
-                } else {
-                    writeResume(data.contextId, {
-                        token: tokenId,
-                        filename: selectedFile.name,
-                        size: selectedFile.size,
-                        chunksize: chunkSize,
-                        fingerprint: fingerprint,
-                    });
-                }
-                hideResume();
-                setStatus(await getString('uploading', 'repository_largefile'));
-                staged = backgroundResume
-                    ? await resumeBackgroundUpload(selectedFile, tokenId, chunkSize, setProgress, controller)
-                    : await uploadFileChunked(selectedFile, tokenId, chunkSize, setProgress, controller, resumeFrom);
+                staged = await uploadInForeground(selectedFile, resuming, run);
             }
             // A cancelled transfer returns false: leave the picker untouched.
             if (controller.cancelled || staged === false) {
@@ -1007,7 +1057,7 @@ const openUploadModal = async(data) => {
             // pendingResume too keeps the modal-hide abort() from deleting the file we
             // just finished.
             controller.token = null;
-            if (backgroundResume) {
+            if (run.backgroundResume) {
                 writeBgRecord(pendingResume.token, null);
             } else {
                 writeResume(data.contextId, null);
@@ -1023,7 +1073,7 @@ const openUploadModal = async(data) => {
             // Every other failure drops a partially staged token so a retry does not
             // orphan it (a cancel has already deleted and cleared it via abort()) and
             // forgets the foreground record since that token is gone.
-            if (!backgroundResume) {
+            if (!run.backgroundResume) {
                 if (controller.token) {
                     postRequest({action: 'delete', id: controller.token}, null, null, null, null);
                     controller.token = null;
