@@ -24,7 +24,7 @@ namespace repository_largefile\local;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @covers     \repository_largefile\local\url_fetcher
  */
-final class url_fetcher_test extends \basic_testcase {
+final class url_fetcher_test extends \advanced_testcase {
     /**
      * Only absolute http(s) URLs with a host are accepted as fetchable.
      *
@@ -81,6 +81,39 @@ final class url_fetcher_test extends \basic_testcase {
      * The live disk check trips only when free space is known and below the reserve:
      * a filesystem with room reports false, and an unmeasurable directory reports
      * false too (that fetch is bounded by the fixed fallback ceiling instead).
+     *
+     * @return void
+     */
+    /**
+     * The stall window is read from the plugin's admin setting, with a bounded floor
+     * (30s) and ceiling (1h) so a misconfigured value can never disable stall
+     * detection or set it absurdly high.
+     *
+     * @return void
+     */
+    public function test_stall_window_from_setting(): void {
+        $this->resetAfterTest();
+        // Absent (never configured) uses the 2-minute default.
+        unset_config('transferstall', 'largefile');
+        $this->assertSame(120, url_fetcher::stall_window_seconds());
+        // A configured value in range is honoured verbatim.
+        set_config('transferstall', 300, 'largefile');
+        $this->assertSame(300, url_fetcher::stall_window_seconds());
+        // Below the documented floor: clamp up to the floor, do NOT silently reset
+        // to the default — the admin asked for shorter.
+        set_config('transferstall', 5, 'largefile');
+        $this->assertSame(30, url_fetcher::stall_window_seconds());
+        set_config('transferstall', 30, 'largefile');
+        $this->assertSame(30, url_fetcher::stall_window_seconds());
+        // Above the ceiling: clamp down to the ceiling.
+        set_config('transferstall', 999999, 'largefile');
+        $this->assertSame(3600, url_fetcher::stall_window_seconds());
+    }
+
+    /**
+     * The disk-below-reserve check trips only when free space is known and below the
+     * reserve; an unmeasurable directory returns false (the fetch is bounded by the
+     * fallback ceiling instead).
      *
      * @return void
      */

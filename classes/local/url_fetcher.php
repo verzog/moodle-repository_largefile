@@ -153,7 +153,16 @@ class url_fetcher {
             'CURLOPT_FOLLOWLOCATION' => $followredirects ? 1 : 0,
             'CURLOPT_MAXREDIRS' => $followredirects ? 5 : 0,
             'CURLOPT_CONNECTTIMEOUT' => 30,
-            'CURLOPT_TIMEOUT' => 600,
+            // Abort on a real stall, not on size: fewer than 1 KB/s sustained for the
+            // configured stall window (default 2 minutes) is dead, not slow. Without
+            // this an import of a many-gigabyte backup over a modest link (or of a big
+            // share between two sites) is killed by a fixed overall timeout even
+            // though it is progressing normally. The size and disk-space caps in the
+            // progress callback still gate real growth, and CURLOPT_TIMEOUT is left as
+            // a very high runaway safety net (24h).
+            'CURLOPT_LOW_SPEED_LIMIT' => 1024,
+            'CURLOPT_LOW_SPEED_TIME' => self::stall_window_seconds(),
+            'CURLOPT_TIMEOUT' => 86400,
             'CURLOPT_SSL_VERIFYPEER' => 1,
             'CURLOPT_SSL_VERIFYHOST' => 2,
             'CURLOPT_USERAGENT' => self::FETCH_USER_AGENT,
@@ -215,17 +224,26 @@ class url_fetcher {
         $raw = $curl->rawresponse ?? '';
         $this->lastdispositionname = $this->disposition_filename(is_array($raw) ? implode("\n", $raw) : (string) $raw);
 
-        // CURLE_ABORTED_BY_CALLBACK (42): the progress callback stopped the transfer,
-        // either because the disk ran low or because the body was oversize. Report
-        // which, not a generic failure.
-        if ((int) ($curl->errno ?? 0) === 42) {
+        // Classify the abort so the Transfers page shows an actionable reason:
+        // CURLE_ABORTED_BY_CALLBACK (42) is the progress callback stopping it for an
+        // oversize body or a disk that dropped below the reserve;
+        // CURLE_OPERATION_TIMEDOUT (28) is the low-speed policy — the connection was
+        // silent for the stall window, i.e. a real stall, not just a big file;
+        // anything else is a transport error (TLS, connection reset, DNS, or a 4xx
+        // from the peer that came without a body).
+        $errno = (int) ($curl->errno ?? 0);
+        if ($errno === 42) {
             @unlink($target);
             if ($disk->full) {
                 throw new \moodle_exception('errordownloaddiskfull', 'repository_largefile');
             }
             throw new \moodle_exception('errordownloadtoobig', 'repository_largefile');
         }
-        if ($result !== true || !empty($curl->errno)) {
+        if ($errno === 28) {
+            @unlink($target);
+            throw new \moodle_exception('errordownloadstalled', 'repository_largefile');
+        }
+        if ($result !== true || $errno !== 0) {
             @unlink($target);
             throw new \moodle_exception('errordownloadfailed', 'repository_largefile');
         }
@@ -267,6 +285,29 @@ class url_fetcher {
         // A nearly full disk still gets the small fixed ceiling rather than zero or
         // a negative cap, which the caller would read as "unlimited".
         return $ceiling > 0 ? $ceiling : self::DEFAULT_MAXBYTES;
+    }
+
+    /**
+     * How long a fetch may go without progress before it is aborted as stalled, from
+     * the plugin's admin setting (default 2 minutes). Bounded to a sane range so a
+     * misconfigured value can never disable the stall check or set it absurdly high.
+     *
+     * @return int Seconds.
+     */
+    public static function stall_window_seconds(): int {
+        $raw = get_config('largefile', 'transferstall');
+        // Distinguish absent from below-floor: an unset setting takes the default
+        // (2 minutes); a configured value below the documented floor is clamped up
+        // to the floor, so an admin who sets a very small window gets what the
+        // help text advertises rather than a silent bump to the default.
+        if ($raw === false || $raw === '') {
+            return 120;
+        }
+        $seconds = (int) $raw;
+        if ($seconds < 30) {
+            return 30;
+        }
+        return min($seconds, 3600);
     }
 
     /**

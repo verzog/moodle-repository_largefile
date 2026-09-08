@@ -2,6 +2,34 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.3 — 2026-09-08
+
+Long-transfer fixes: peer imports and URL imports of many-gigabyte files were being
+cut off by wall-clock limits that only made sense for small files. No schema change.
+
+- **Fix: long peer-share and URL transfers were killed at ten minutes.** The receiver's
+  cURL fetch used a fixed 600-second overall timeout, which is fine for a small file but
+  cuts a legitimate multi-gigabyte transfer short. The timeout is now stall-based —
+  abort only if the connection goes without any bytes for the configured window
+  (default 2 minutes, admin setting *Stall a peer download after*) — with a 24-hour
+  absolute ceiling as a runaway safety net; size and disk-space are still enforced in
+  the progress callback.
+- **Fix: the sender's share download had no PHP time limit.** Streaming a large
+  encrypted file back to a peer could run into `max_execution_time` on a host that had
+  not raised it, dropping the connection mid-stream. `share.php` now calls
+  `core_php_time_limit::raise()` for the download.
+- **A "Stalled" reason on the Transfers page, split from generic transport failures.**
+  A peer download killed by the low-speed policy (`CURLE_OPERATION_TIMEDOUT`, errno
+  28) now reports *"The transfer stalled: no bytes arrived from the peer for the stall
+  window…"* rather than the same generic *"The file could not be downloaded from
+  that URL."* used for TLS, connection-reset and 4xx failures. Easier to tell a real
+  stall from a real transport error.
+- **New admin setting *Reclaim died transfer after* (`transferlease`).** How long a
+  transfer whose worker actually died (cron killed, host restart) sits in "running"
+  before cron returns it to the queue for another try. Does *not* affect a still-alive
+  transfer — Moodle's scheduled-task lock stops another cron reclaiming a run that is
+  still going — so shorter is better. Default 1 hour, bounded 15 minutes – 12 hours.
+
 ## 0.7.2 — 2026-09-08
 
 - **Fix: Check connection crashed with "Class curl not found".** On the

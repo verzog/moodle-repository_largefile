@@ -46,7 +46,45 @@ class process_transfers extends \core\task\scheduled_task {
      * recovers a dead job within about an hour rather than leaving it stuck for most
      * of a day.
      */
-    private const LEASE = 1 * HOURSECS;
+    /** @var int Sanity floor for the reclaim lease: reclaiming any sooner would
+     *   risk a still-alive worker's row being retried, since a run that has not
+     *   yet updated its progressupdated row is indistinguishable from a died one. */
+    private const MIN_LEASE = 15 * MINSECS;
+
+    /** @var int Sanity ceiling: past this a died worker takes far too long to be
+     *   returned to the queue. Well within the 7-day retention window. */
+    private const MAX_LEASE = 12 * HOURSECS;
+
+    /** @var int Default reclaim lease when the admin setting is unset (1 hour).
+     *  This does not need to exceed the longest legitimate transfer: Moodle's
+     *  scheduled_task lock is held for the whole run of this task, so another cron
+     *  cannot enter reclaim_stale() while a healthy transfer is still going —
+     *  {@see Codex review on PR #28}. It only affects how long a genuinely died
+     *  worker's row sits in "running" before it is retried, so shorter is better. */
+    private const DEFAULT_LEASE = HOURSECS;
+
+    /**
+     * The reclaim lease: a running transfer whose timestarted is older than this,
+     * *and* whose worker has actually died (this task is not currently running it —
+     * the scheduled-task lock enforces that), is returned to the queue. Read from
+     * the plugin's admin setting, bounded to a sane range.
+     *
+     * @return int Seconds.
+     */
+    private static function lease_seconds(): int {
+        $raw = get_config('largefile', 'transferlease');
+        // Distinguish absent from below-floor: an unset setting takes the default; a
+        // configured value under the floor is clamped up rather than silently reset,
+        // so an admin who wants faster recovery than the default gets it.
+        if ($raw === false || $raw === '') {
+            return self::DEFAULT_LEASE;
+        }
+        $seconds = (int) $raw;
+        if ($seconds < self::MIN_LEASE) {
+            return self::MIN_LEASE;
+        }
+        return min($seconds, self::MAX_LEASE);
+    }
 
     /**
      * Task name shown in the admin task list.
@@ -65,7 +103,7 @@ class process_transfers extends \core\task\scheduled_task {
     public function execute(): void {
         // Return any transfer left running by an interrupted earlier run to the
         // queue before picking up new work.
-        transfer_manager::reclaim_stale(time() - self::LEASE);
+        transfer_manager::reclaim_stale(time() - self::lease_seconds());
         $due = transfer_manager::get_due(time(), self::BATCH);
         foreach ($due as $transfer) {
             transfer_runner::run($transfer);

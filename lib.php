@@ -214,7 +214,7 @@ class repository_largefile extends repository {
     public static function get_type_option_names() {
         return array_merge(
             parent::get_type_option_names(),
-            ['chunksize', 'state0duration', 'state1duration', 'state2duration'],
+            ['chunksize', 'state0duration', 'state1duration', 'state2duration', 'transferstall', 'transferlease'],
             // Import policy: opt-in type restriction, the accepted kinds, and the
             // destinations an imported file may be routed to.
             ['restricttypes', 'accept_backup', 'accept_scorm', 'accept_imscc', 'accept_video'],
@@ -251,6 +251,18 @@ class repository_largefile extends repository {
         $mform->addElement('duration', 'state2duration', get_string('setting:state2duration', 'repository_largefile'));
         $mform->setDefault('state2duration', 86400);
         $mform->addHelpButton('state2duration', 'setting:state2duration', 'repository_largefile');
+
+        // Long-transfer policy: how long a peer download may stall before it is
+        // treated as dead, and how long a running server-side transfer may run
+        // before cron reclaims it as a died worker. Defaults suit a typical
+        // multi-gigabyte peer share; only lower them if you know why.
+        $mform->addElement('duration', 'transferstall', get_string('setting:transferstall', 'repository_largefile'));
+        $mform->setDefault('transferstall', 120);
+        $mform->addHelpButton('transferstall', 'setting:transferstall', 'repository_largefile');
+
+        $mform->addElement('duration', 'transferlease', get_string('setting:transferlease', 'repository_largefile'));
+        $mform->setDefault('transferlease', 60 * 60);
+        $mform->addHelpButton('transferlease', 'setting:transferlease', 'repository_largefile');
 
         // Import policy: which file kinds are accepted, and where an import may land.
         $mform->addElement('header', 'largefilepolicyheader', get_string('setting:policyheader', 'repository_largefile'));
