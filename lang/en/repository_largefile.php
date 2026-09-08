@@ -68,6 +68,8 @@ $string['errornocoursechosen'] = 'Choose the course whose backup area the file s
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
 $string['errorpeerinsecureurl'] = 'The peer\'s site URL must use https. Signed download requests and the encrypted backup '
     . 'travel to this address, so a plain http peer is not accepted.';
+$string['errorpeernourl'] = 'This peer has no Site URL, so its connection cannot be checked. Edit the peer and add its '
+    . 'address.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
@@ -140,6 +142,19 @@ $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
 $string['notransfers'] = 'No transfers have been queued yet.';
 $string['nouploadsinprogress'] = 'No uploads are currently in progress.';
+$string['peercheck'] = 'Check connection';
+$string['peercheckbadendpoint'] = 'The address answered, but not as a Large file plugin share endpoint. Check the Site '
+    . 'URL, and that the peer runs release 0.7.1 or later (connection checks need it).';
+$string['peercheckcol'] = 'Connection';
+$string['peerchecked'] = 'checked {$a} ago';
+$string['peercheckfailed'] = 'Failed';
+$string['peerchecknever'] = 'Not checked yet';
+$string['peercheckok'] = 'Connected. The peer recognises this site as "{$a->name}" and runs Large file plugin '
+    . '{$a->release}.';
+$string['peercheckokshort'] = 'Connected';
+$string['peercheckrejected'] = 'The peer refused the check: {$a} Usually the shared secret differs between the two '
+    . 'sites, or their clocks are more than five minutes apart.';
+$string['peercheckunreachable'] = 'Could not connect to the peer: {$a}';
 $string['peerdeleted'] = 'Peer deleted.';
 $string['peername'] = 'Peer name';
 $string['peersaved'] = 'Peer saved.';
@@ -224,6 +239,7 @@ $string['sharemaxdownloads'] = 'Maximum downloads';
 $string['sharemaxdownloads_help'] = 'How many times the share may be downloaded before it stops working. Use 0 for no '
     . 'limit. A download counts from the moment it starts, so one cut off by a network fault still uses up an attempt; '
     . 'the default of 3 leaves room for a retry or two without leaving the share open indefinitely.';
+$string['sharenotstored'] = 'file not yet stored';
 $string['sharepeer'] = 'Share with peer';
 $string['sharepublishbackground'] = 'Create in the background';
 $string['sharepublishbackground_help'] = 'Recommended for large backups. The backup is encrypted on the server rather '
@@ -240,10 +256,14 @@ $string['task:processtransfers'] = 'Run queued large-file transfers';
 $string['tokenexpired'] = 'The upload session has expired. Close and reopen the file picker to start again.';
 $string['transfercancelled'] = 'Transfer cancelled.';
 $string['transfereta'] = 'about {$a} left';
+$string['transferfile'] = 'File';
 $string['transfernew'] = 'Queue a new transfer';
 $string['transferoutcome'] = 'Outcome';
 $string['transferprogress'] = 'Progress';
 $string['transferqueue'] = 'Queued transfers';
+$string['transferqueue_desc'] = '{$a->scheduled} is waiting for the next cron run (or its set time). {$a->running} is '
+    . 'being worked on by cron now — the Outcome column shows its progress. {$a->completed} has finished; Outcome names '
+    . 'the result. {$a->failed} stopped with the error shown in Outcome; fix the cause and queue it again.';
 $string['transferqueued'] = 'Transfer queued.';
 $string['transferrate'] = 'avg {$a}/s';
 $string['transferremoved'] = 'Transfer removed.';
@@ -253,6 +273,7 @@ $string['transfers_desc'] = 'Queue a server-side file transfer to run unattended
     . 'transfer and chunked upload happening across the site.';
 $string['transferscheduledpast'] = 'Choose a time in the future.';
 $string['transferscheduledtime'] = 'Run at';
+$string['transfersourceshare'] = 'Share from {$a}';
 $string['transferstalled'] = 'no progress for {$a}';
 $string['transferstatus'] = 'Status';
 $string['transferstatus_cancelled'] = 'Cancelled';
@@ -260,6 +281,7 @@ $string['transferstatus_completed'] = 'Completed';
 $string['transferstatus_failed'] = 'Failed';
 $string['transferstatus_running'] = 'Running';
 $string['transferstatus_scheduled'] = 'Scheduled';
+$string['transferstoring'] = 'encrypted, storing the file';
 $string['transfertype'] = 'Type';
 $string['transfertypepublish'] = 'Backup share (publish)';
 $string['transfertypeshare'] = 'Peer share import';

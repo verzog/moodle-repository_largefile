@@ -101,7 +101,7 @@ class transfer_manager {
             'type' => $type,
             'userid' => $userid,
             'contextid' => $contextid ?: null,
-            'filename' => $filename !== '' ? $filename : null,
+            'filename' => $filename !== '' ? \core_text::substr($filename, 0, 255) : null,
             'payload' => json_encode($payload),
             'status' => self::STATUS_SCHEDULED,
             // An immediate transfer's effective due time is now, so it is ordered
@@ -227,6 +227,21 @@ class transfer_manager {
                 'current' => $percent,
             ]
         );
+    }
+
+    /**
+     * Record the transfer's file name once it becomes known (a URL import learns it
+     * from the response, a share import from the peer's metadata), so the Transfers
+     * table shows what is being moved while the job is still running.
+     *
+     * @param int $id The transfer id.
+     * @param string $filename The file name; empty clears it.
+     * @return void
+     */
+    public static function set_filename(int $id, string $filename): void {
+        global $DB;
+        $filename = \core_text::substr($filename, 0, 255);
+        $DB->set_field(self::TABLE, 'filename', $filename !== '' ? $filename : null, ['id' => $id]);
     }
 
     /**

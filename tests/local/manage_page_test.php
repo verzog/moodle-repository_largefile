@@ -88,6 +88,38 @@ final class manage_page_test extends \advanced_testcase {
     }
 
     /**
+     * At 100% the encryption is done and the encrypted file is being stored, a step
+     * that reports no progress: the readout says so rather than flagging a stall or
+     * inventing a rate and ETA.
+     *
+     * @return void
+     */
+    public function test_running_progress_reports_storing_at_100_percent(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            1,
+            ['peerid' => 1, 'filesize' => 100 * 1024 * 1024],
+            0,
+            \context_system::instance()->id,
+            'backup.mbz'
+        );
+        transfer_manager::claim($id);
+        $DB->set_field(transfer_manager::TABLE, 'timestarted', time() - 600, ['id' => $id]);
+        transfer_manager::set_progress($id, 100);
+        $DB->set_field(transfer_manager::TABLE, 'progressupdated', time() - 300, ['id' => $id]);
+
+        $summary = manage_page::running_progress(transfer_manager::get($id));
+
+        $this->assertStringContainsString('100%', $summary);
+        $this->assertStringContainsString(get_string('transferstoring', 'repository_largefile'), $summary);
+        $this->assertStringNotContainsString('no progress for', $summary);
+        $this->assertStringNotContainsString('/s', $summary);
+        $this->assertStringContainsString('running for', $summary);
+    }
+
+    /**
      * Without a recorded size (or before any progress) only the percent shows, so
      * the readout never divides by zero or invents a rate.
      *
@@ -160,6 +192,104 @@ final class manage_page_test extends \advanced_testcase {
         $html = manage_page::active_uploads_html();
         $this->assertStringContainsString('99%', $html);
         $this->assertStringNotContainsString('100%', $html);
+    }
+
+    /**
+     * The Connection cell reads "Not checked yet", "Connected · checked … ago" or
+     * "Failed · checked … ago — reason" from the recorded last check.
+     *
+     * @return void
+     */
+    public function test_peer_check_html(): void {
+        $never = (object) ['lastcheck' => null, 'lastcheckok' => null, 'lastcheckmessage' => null];
+        $nevertext = get_string('peerchecknever', 'repository_largefile');
+        $this->assertStringContainsString($nevertext, manage_page::peer_check_html($never));
+
+        $ok = (object) ['lastcheck' => time() - 60, 'lastcheckok' => 1, 'lastcheckmessage' => 'Connected.'];
+        $html = manage_page::peer_check_html($ok);
+        $this->assertStringContainsString('bg-success', $html);
+        $this->assertStringContainsString('checked', $html);
+
+        $failed = (object) ['lastcheck' => time() - 60, 'lastcheckok' => 0, 'lastcheckmessage' => 'Could not <b>connect</b>'];
+        $html = manage_page::peer_check_html($failed);
+        $this->assertStringContainsString('bg-danger', $html);
+        $this->assertStringContainsString('Could not &lt;b&gt;connect', $html);
+    }
+
+    /**
+     * Each transfer status renders as a badge with its own colour class and label, and
+     * an unknown status degrades to a neutral badge rather than an error.
+     *
+     * @return void
+     */
+    public function test_transfer_status_badge(): void {
+        $running = manage_page::transfer_status_badge(transfer_manager::STATUS_RUNNING);
+        $this->assertStringContainsString('badge', $running);
+        $this->assertStringContainsString('bg-primary', $running);
+        $this->assertStringContainsString(get_string('transferstatus_running', 'repository_largefile'), $running);
+        $this->assertStringContainsString('bg-success', manage_page::transfer_status_badge(transfer_manager::STATUS_COMPLETED));
+        $this->assertStringContainsString('bg-danger', manage_page::transfer_status_badge(transfer_manager::STATUS_FAILED));
+        $this->assertStringContainsString('bg-secondary', manage_page::transfer_status_badge(transfer_manager::STATUS_SCHEDULED));
+        $this->assertStringContainsString('bg-dark', manage_page::transfer_status_badge(transfer_manager::STATUS_CANCELLED));
+        $unknown = manage_page::transfer_status_badge('weird');
+        $this->assertStringContainsString('bg-secondary', $unknown);
+        $this->assertStringContainsString('weird', $unknown);
+    }
+
+    /**
+     * The Transfers table names what each row is moving: the recorded file name when
+     * known, otherwise the share's host or the URL's file name and host, muted.
+     *
+     * @return void
+     */
+    public function test_transfer_file_label(): void {
+        $this->resetAfterTest();
+        $system = \context_system::instance()->id;
+
+        $share = transfer_manager::create(
+            transfer_manager::TYPE_SHARE,
+            1,
+            ['peerid' => 1, 'shareurl' => 'https://learn.example.org/repository/largefile/share.php?token=abc'],
+            0,
+            $system
+        );
+        $label = manage_page::transfer_file_label(transfer_manager::get($share));
+        $this->assertStringContainsString('learn.example.org', $label);
+        $this->assertStringContainsString('text-muted', $label);
+        $this->assertStringNotContainsString('token=abc', $label);
+
+        $url = transfer_manager::create(
+            transfer_manager::TYPE_URL,
+            1,
+            ['url' => 'https://files.example.org/backups/course%20one.mbz?sig=1'],
+            0,
+            $system
+        );
+        $label = manage_page::transfer_file_label(transfer_manager::get($url));
+        $this->assertStringContainsString('course one.mbz', $label);
+        $this->assertStringContainsString('files.example.org', $label);
+        $this->assertStringNotContainsString('sig=1', $label);
+
+        // Once the runner records the real name, that is shown instead.
+        transfer_manager::set_filename($share, 'backup-moodle2-course-1.mbz');
+        $this->assertSame('backup-moodle2-course-1.mbz', manage_page::transfer_file_label(transfer_manager::get($share)));
+
+        // A row with neither a name nor a recognisable source shows a dash, never blank.
+        $bare = transfer_manager::create(transfer_manager::TYPE_SHARE, 1, [], 0, $system);
+        $this->assertSame('—', manage_page::transfer_file_label(transfer_manager::get($bare)));
+
+        // An import completed before names were recorded shows its result (the stored
+        // file name) rather than a guess from its source.
+        $old = transfer_manager::create(
+            transfer_manager::TYPE_URL,
+            1,
+            ['url' => 'https://files.example.org/download?id=9'],
+            0,
+            $system
+        );
+        transfer_manager::claim($old);
+        transfer_manager::mark_completed($old, 'real-name.mbz');
+        $this->assertSame('real-name.mbz', manage_page::transfer_file_label(transfer_manager::get($old)));
     }
 
     /**

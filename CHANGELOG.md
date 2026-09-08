@@ -2,6 +2,39 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.1 — 2026-09-08
+
+- **The Transfers queue now says what each transfer is moving.** The *Queued
+  transfers* table gains a **File** column. It shows the file name as soon as it is
+  known — a URL import records the URL's file name when queued and the
+  server-supplied name once the download starts; a peer-share import records the
+  name the moment the peer's metadata is fetched, before the (long) download — and
+  until then shows the source instead (the share's host, or the URL's file name and
+  host), so a row is never anonymous.
+- **Check a trusted peer's connection.** The Trusted peers page gains a
+  **Connection** column and a **Check connection** action. One signed round trip to
+  the peer's share endpoint confirms, at once, that the peer is reachable over TLS
+  through this site's outgoing-request policy, runs this plugin, holds the same
+  shared secret and agrees on the time — and reports which of those failed
+  (unreachable, wrong address or older release, refused: secret or clock). The peer
+  replies with how it knows this site and its plugin release. The outcome and time
+  are remembered on the listing. New `action=ping` on the share endpoint (peer
+  identified by which secret verifies the signature; no share token involved) and
+  three nullable columns on the peers table, added by upgrade.
+- **Colour-coded statuses with a key.** Transfer statuses are now badges — grey
+  *Scheduled* (waiting for cron), blue *Running*, green *Completed*, red *Failed*,
+  dark *Cancelled* — on the Transfers page and the Backup shares page, and the
+  *Queued transfers* heading carries a one-line key explaining what each means.
+- **Clearer end-of-publish progress, and no duplicate shares after a crash.** Once a
+  background publication finishes encrypting, it copies the encrypted file into the
+  file store — a step that reports no progress and takes minutes for a large backup —
+  and the Transfers page used to show that as "99% · no progress for …". It now reads
+  *100% · encrypted, storing the file*. On the Backup shares page a share whose file
+  is not yet stored is badged *file not yet stored* (a running publication, or one
+  that died mid-store and should be revoked), and a retried publication first removes
+  any such file-less leftover for the same backup, so a crash can no longer leave a
+  duplicate share beside the good one.
+
 ## 0.7.0 — 2026-09-08
 
 The remaining items from the stability and security review, all implemented as

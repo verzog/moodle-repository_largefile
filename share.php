@@ -38,7 +38,7 @@ use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_manager;
 use repository_largefile\local\signer;
 
-$token = required_param('token', PARAM_ALPHANUM);
+$token = optional_param('token', '', PARAM_ALPHANUM);
 $action = required_param('action', PARAM_ALPHA);
 
 // Every response — success or rejection — carries the protocol marker, so a
@@ -75,6 +75,26 @@ if ($authheader !== '') {
     $sig = optional_param('sig', '', PARAM_ALPHANUM);
 }
 
+// A connection check from a paired site: signed with the pairing secret but tied
+// to no share, so the caller is identified by which peer's secret verifies. It
+// confirms reachability, TLS, the SSRF exemption, the shared secret and the clocks
+// in one round trip, and tells the caller how this site knows it.
+if ($action === 'ping') {
+    $params = ['action' => 'ping', 'ts' => (string) $ts, 'nonce' => $nonce, 'sig' => $sig];
+    $match = peer_manager::find_by_signature($params);
+    if ($match['peer'] === null) {
+        $reject(403, get_string($match['error'], 'repository_largefile'));
+    }
+    $info = core_plugin_manager::instance()->get_plugin_info('repository_largefile');
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(['ok' => true, 'peer' => $match['peer']->name, 'release' => (string) ($info->release ?? '')]);
+    die;
+}
+
+if ($token === '') {
+    $reject(403, get_string('errorsharesig', 'repository_largefile'));
+}
 $share = share_manager::get_by_token($token);
 $secret = $share ? peer_manager::get_secret((int) $share->peerid) : null;
 if (!$share || $secret === null) {

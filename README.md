@@ -133,6 +133,12 @@ php admin/cli/cfg.php --component=largefile --name=allowinsecurepeers --set=1
 Deleting a peer revokes every share published to it (and deletes their encrypted
 files), since nothing could download them any more.
 
+**Check connection** on the Trusted peers page makes one signed request to the
+peer's share endpoint and reports, in one go, whether the peer is reachable over
+TLS through this site's outgoing-request policy, runs this plugin (0.7.1 or later),
+holds the same shared secret and agrees on the time; the result and time of the last
+check are shown beside each peer. Run it on both sites after pairing.
+
 The Site URL does double duty: a share link is accepted only if it is on the same
 origin (scheme, host and port) as the peer it is imported from, and that one origin
 is the sole target allowed past the cURL block below when importing that peer's

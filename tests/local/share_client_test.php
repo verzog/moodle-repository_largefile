@@ -92,6 +92,37 @@ final class share_client_test extends \advanced_testcase {
     }
 
     /**
+     * The connection-check endpoint is the peer's share.php under its Site URL, with
+     * or without a trailing slash or a subdirectory.
+     *
+     * @return void
+     */
+    public function test_ping_endpoint(): void {
+        $this->assertSame(
+            'https://peer.example.org/repository/largefile/share.php',
+            share_client::ping_endpoint('https://peer.example.org')
+        );
+        $this->assertSame(
+            'https://peer.example.org/moodle/repository/largefile/share.php',
+            share_client::ping_endpoint(' https://peer.example.org/moodle/ ')
+        );
+    }
+
+    /**
+     * A check against a peer with no Site URL fails with a clear message and no request.
+     *
+     * @return void
+     */
+    public function test_ping_requires_a_site_url(): void {
+        $this->resetAfterTest();
+        $id = peer_manager::create('Legacy', str_repeat('s', 24));
+        $result = share_client::ping($id);
+        $this->assertFalse($result['ok']);
+        $this->assertSame(get_string('errorpeernourl', 'repository_largefile'), $result['message']);
+        $this->assertFalse(share_client::ping(999999)['ok']);
+    }
+
+    /**
      * The protocol marker is recognised case-insensitively and its absence marks an
      * endpoint that predates header authentication.
      *

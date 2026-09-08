@@ -49,6 +49,92 @@ class manage_page {
     }
 
     /**
+     * The outcome of a peer's last connection check as a badge plus detail: green
+     * "Connected" or red "Failed" with when it was checked and, for a failure, why;
+     * grey "Not checked yet" when it never has been.
+     *
+     * @param \stdClass $peer The peer row.
+     * @return string HTML for the table cell.
+     */
+    public static function peer_check_html(\stdClass $peer): string {
+        if (empty($peer->lastcheck)) {
+            $never = get_string('peerchecknever', 'repository_largefile');
+            return \html_writer::tag('span', $never, ['class' => 'badge bg-secondary']);
+        }
+        $ok = !empty($peer->lastcheckok);
+        $badge = \html_writer::tag(
+            'span',
+            get_string($ok ? 'peercheckokshort' : 'peercheckfailed', 'repository_largefile'),
+            ['class' => 'badge ' . ($ok ? 'bg-success' : 'bg-danger')]
+        );
+        $when = get_string('peerchecked', 'repository_largefile', format_time(max(0, time() - (int) $peer->lastcheck)));
+        $detail = $ok ? $when : $when . ' — ' . s((string) $peer->lastcheckmessage);
+        return $badge . ' ' . \html_writer::tag('span', $detail, ['class' => 'text-muted small']);
+    }
+
+    /**
+     * A transfer's status as a colour-coded badge, so the state of a queue reads at a
+     * glance: grey while waiting for cron (Scheduled), blue while cron is working on
+     * it (Running), green when done (Completed), red when it failed, dark when cancelled.
+     *
+     * @param string $status One of the transfer_manager::STATUS_* values.
+     * @return string HTML for the badge.
+     */
+    public static function transfer_status_badge(string $status): string {
+        $classes = [
+            transfer_manager::STATUS_SCHEDULED => 'bg-secondary',
+            transfer_manager::STATUS_RUNNING => 'bg-primary',
+            transfer_manager::STATUS_COMPLETED => 'bg-success',
+            transfer_manager::STATUS_FAILED => 'bg-danger',
+            transfer_manager::STATUS_CANCELLED => 'bg-dark',
+        ];
+        $class = $classes[$status] ?? 'bg-secondary';
+        $label = get_string_manager()->string_exists('transferstatus_' . $status, 'repository_largefile')
+            ? get_string('transferstatus_' . $status, 'repository_largefile')
+            : s($status);
+        return \html_writer::tag('span', $label, ['class' => 'badge ' . $class]);
+    }
+
+    /**
+     * What a queued transfer is moving, for the Transfers table: the file name once
+     * it is known, otherwise where the file is coming from — a peer share's host, or
+     * a URL's file name and host — so a row is never anonymous.
+     *
+     * @param \stdClass $transfer A transfer row.
+     * @return string HTML for the table cell.
+     */
+    public static function transfer_file_label(\stdClass $transfer): string {
+        if (!empty($transfer->filename)) {
+            return format_string((string) $transfer->filename);
+        }
+        // An import completed before names were recorded: its result is the stored
+        // file name, which beats guessing from the source.
+        $isimport = in_array($transfer->type, [transfer_manager::TYPE_URL, transfer_manager::TYPE_SHARE], true);
+        if ($isimport && $transfer->status === transfer_manager::STATUS_COMPLETED && !empty($transfer->result)) {
+            return format_string((string) $transfer->result);
+        }
+        $payload = transfer_manager::payload($transfer);
+        $source = '';
+        if ($transfer->type === transfer_manager::TYPE_SHARE) {
+            $host = (string) parse_url((string) ($payload['shareurl'] ?? ''), PHP_URL_HOST);
+            if ($host !== '') {
+                $source = get_string('transfersourceshare', 'repository_largefile', $host);
+            }
+        } else if ($transfer->type === transfer_manager::TYPE_URL) {
+            $url = (string) ($payload['url'] ?? '');
+            $host = (string) parse_url($url, PHP_URL_HOST);
+            $name = trim(rawurldecode(basename((string) parse_url($url, PHP_URL_PATH))));
+            $source = $name !== '' && $host !== '' ? $name . ' · ' . $host : $name . $host;
+        }
+        if ($source === '') {
+            return '—';
+        }
+        // Not yet the real file name, so shown muted: the runner fills the name in as
+        // soon as the peer's metadata or the URL's response headers reveal it.
+        return \html_writer::tag('span', s($source), ['class' => 'text-muted']);
+    }
+
+    /**
      * A one-line progress summary for a running transfer.
      *
      * Shows the percent and how long it has been running; when the transfer records
@@ -75,7 +161,12 @@ class manage_page {
         $sincestep = $lastadvance ? $now - $lastadvance : 0;
         $stalled = $percent > 0 && $percent < 100 && $sincestep > max(120, (int) (3 * $stepaverage));
 
-        if ($stalled) {
+        if ($percent >= 100) {
+            // Encryption is finished; the encrypted file is being copied into the file
+            // store, a step that reports no progress and takes minutes for a large
+            // backup. Say so instead of leaving a frozen percentage.
+            $parts[] = get_string('transferstoring', 'repository_largefile');
+        } else if ($stalled) {
             $parts[] = get_string('transferstalled', 'repository_largefile', format_time($sincestep));
         } else if ($total > 0 && $percent > 0 && $elapsed > 0) {
             $done = (int) ($total * $percent / 100);
