@@ -139,3 +139,57 @@ jobs:
       - name: PHPUnit tests
         if: ${{ !cancelled() }}
         run: moodle-plugin-ci phpunit --fail-on-warning
+
+  # The AMD modules are shipped pre-built in amd/build. This job rebuilds them with
+  # Moodle's own grunt toolchain (Babel + minifier + ESLint) and fails if the result
+  # differs from what is committed, so a hand-built or stale artefact — which once
+  # shipped a dialogue broken in every browser — can never reach main again.
+  amd-build:
+    name: AMD build matches source (grunt)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready" --health-interval=10s
+          --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: zip, xml, gd, mbstring, sodium, intl, soap, xmlrpc
+          ini-values: max_input_vars=7000
+          coverage: none
+
+      - name: Initialise moodle-plugin-ci
+        run: |
+          composer create-project -n --no-dev --prefer-dist \
+            moodlehq/moodle-plugin-ci ci ^4
+          echo "$(pwd)/ci/bin" >> "$GITHUB_PATH"
+          echo "$(pwd)/ci/vendor/bin" >> "$GITHUB_PATH"
+          sudo locale-gen en_AU.UTF-8
+          # Lets the install step provision the Node version Moodle's .nvmrc names.
+          echo "NVM_DIR=$HOME/.nvm" >> "$GITHUB_ENV"
+
+      - name: Install Moodle (with its Node toolchain)
+        run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1 --db-port=5432
+        env:
+          DB: pgsql
+          MOODLE_BRANCH: MOODLE_502_STABLE
+
+      - name: Grunt (rebuild amd/build, lint JS) and fail on any difference
+        run: moodle-plugin-ci grunt --max-lint-warnings 0

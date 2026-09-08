@@ -242,6 +242,50 @@ class share_manager {
     }
 
     /**
+     * Claim one download of a share, atomically: re-check the expiry and download
+     * cap and count the download under a row lock, so two requests arriving together
+     * on a share with one download left cannot both succeed.
+     *
+     * @param int $id The share id.
+     * @return bool True if a download was claimed; false if the share is gone, expired or exhausted.
+     */
+    public static function claim_download(int $id): bool {
+        global $DB;
+        $transaction = $DB->start_delegated_transaction();
+        try {
+            $share = $DB->get_record_sql(
+                'SELECT * FROM {' . self::TABLE . '} WHERE id = :id FOR UPDATE',
+                ['id' => $id]
+            );
+            if (!$share || !self::is_valid($share)) {
+                $transaction->allow_commit();
+                return false;
+            }
+            self::record_download($share);
+            $transaction->allow_commit();
+            return true;
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
+            return false;
+        }
+    }
+
+    /**
+     * Delete every share published to a peer, with their encrypted files.
+     *
+     * @param int $peerid The peer id.
+     * @return int How many shares were removed.
+     */
+    public static function delete_for_peer(int $peerid): int {
+        global $DB;
+        $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'peerid = :peerid', ['peerid' => $peerid]);
+        foreach ($ids as $id) {
+            self::delete((int) $id);
+        }
+        return count($ids);
+    }
+
+    /**
      * Delete a share and its encrypted file.
      *
      * @param int $id The share id.

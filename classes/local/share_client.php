@@ -57,17 +57,25 @@ class share_client {
         [$base, $token] = self::split_url($shareurl);
         $security = self::peer_security($peerid, $base);
 
-        $meta = self::fetch_meta($base, $token, $secret, $security);
+        // Prefer header transport for the credential (it stays out of access logs).
+        // A peer still on a release that reads only the query string rejects that
+        // request, so fall back once to the legacy form and keep using it for the
+        // download; the signature itself is identical either way.
+        $legacy = false;
+        try {
+            $meta = self::fetch_meta($base, $token, $secret, $security, false);
+        } catch (\moodle_exception $e) {
+            $legacy = true;
+            $meta = self::fetch_meta($base, $token, $secret, $security, true);
+        }
         if (!self::meta_is_wellformed($meta)) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
 
-        $downloadurl = $base . '?' . http_build_query(
-            signer::sign(['token' => $token, 'action' => 'download'], $secret)
-        );
+        [$downloadurl, $headers] = self::signed_request($base, ['token' => $token, 'action' => 'download'], $secret, $legacy);
         $fetcher = new url_fetcher();
         $sitemax = (int) ($GLOBALS['CFG']->maxbytes ?? 0);
-        $fetched = $fetcher->fetch($downloadurl, $sitemax, null, $security);
+        $fetched = $fetcher->fetch($downloadurl, $sitemax, null, $security, $headers);
 
         $key = crypto::derive_key($secret, hex2bin($meta['salt']));
         $plainpath = make_request_directory() . '/' . clean_param($meta['filename'], PARAM_FILE);
@@ -155,19 +163,52 @@ class share_client {
     }
 
     /**
+     * Build a signed request to the share endpoint: the URL to fetch plus any
+     * request headers to send with it.
+     *
+     * @param string $base The share endpoint base URL.
+     * @param array $params The parameters to sign (token, action).
+     * @param string $secret The pairing secret.
+     * @param bool $legacy True to put ts/nonce/sig in the query string (older peers);
+     *        false to carry them in the {@see signer::AUTH_HEADER} header.
+     * @return array [string $url, array $headers].
+     */
+    public static function signed_request(string $base, array $params, string $secret, bool $legacy): array {
+        // The separator is given explicitly: Moodle sets PHP's arg_separator.output to
+        // "&amp;" for HTML output, which http_build_query would otherwise use — and a
+        // URL sent to a peer with "&amp;" between its parameters arrives with the
+        // parameters after the first one misnamed ("amp;action"), so the peer rejects it.
+        if ($legacy) {
+            return [$base . '?' . http_build_query(signer::sign($params, $secret), '', '&'), []];
+        }
+        $signed = signer::sign_for_header($params, $secret);
+        return [$base . '?' . http_build_query($signed['params'], '', '&'), [$signed['header']]];
+    }
+
+    /**
      * Fetch and decode the share metadata (a signed GET returning JSON).
      *
      * @param string $base The share endpoint base URL.
      * @param string $token The share token.
      * @param string $secret The pairing secret.
      * @param object|null $security The cURL security helper to apply, or null for the site default.
+     * @param bool $legacy Whether to sign in the legacy query-string form.
      * @return array The decoded metadata.
      * @throws \moodle_exception On a transport error or non-JSON response.
      */
-    private static function fetch_meta(string $base, string $token, string $secret, ?object $security = null): array {
-        $url = $base . '?' . http_build_query(signer::sign(['token' => $token, 'action' => 'meta'], $secret));
+    private static function fetch_meta(
+        string $base,
+        string $token,
+        string $secret,
+        ?object $security = null,
+        bool $legacy = false
+    ): array {
+        [$url, $headers] = self::signed_request($base, ['token' => $token, 'action' => 'meta'], $secret, $legacy);
         $curl = new \curl($security ? ['securityhelper' => $security] : []);
         $curl->setHeader('Accept: application/json');
+        foreach ($headers as $header) {
+            $curl->setHeader($header);
+        }
         $body = $curl->get($url, [], [
             'CURLOPT_FOLLOWLOCATION' => 1,
             'CURLOPT_MAXREDIRS' => 3,

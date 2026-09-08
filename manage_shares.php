@@ -44,10 +44,22 @@ $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/manage_shares.php');
 manage_page::setup($baseurl, get_string('manageshares', 'repository_largefile'));
 
+// Revoking is destructive (the encrypted file is deleted), so confirm on a page with
+// a POSTed continue button rather than an inline script prompt.
 if ($action === 'revoke' && $id) {
     require_sesskey();
-    share_manager::delete($id);
-    redirect($baseurl, get_string('sharedeleted', 'repository_largefile'));
+    if (optional_param('confirm', 0, PARAM_BOOL)) {
+        share_manager::delete($id);
+        redirect($baseurl, get_string('sharedeleted', 'repository_largefile'));
+    }
+    echo $OUTPUT->header();
+    echo $OUTPUT->confirm(
+        get_string('revokeshareconfirm', 'repository_largefile'),
+        new moodle_url($baseurl, ['action' => 'revoke', 'id' => $id, 'confirm' => 1, 'sesskey' => sesskey()]),
+        $baseurl
+    );
+    echo $OUTPUT->footer();
+    exit;
 }
 if ($action === 'cancelpublish' && $id) {
     require_sesskey();
@@ -209,8 +221,7 @@ if ($shares) {
         $link = (new moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
         $revoke = html_writer::link(
             new moodle_url($baseurl, ['action' => 'revoke', 'id' => $share->id, 'sesskey' => sesskey()]),
-            get_string('revokeshare', 'repository_largefile'),
-            ['onclick' => "return confirm('" . get_string('revokeshareconfirm', 'repository_largefile') . "');"]
+            get_string('revokeshare', 'repository_largefile')
         );
         $table->data[] = [
             format_string($share->filename),

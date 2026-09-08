@@ -41,10 +41,22 @@ $id = optional_param('id', 0, PARAM_INT);
 $baseurl = new moodle_url('/repository/largefile/manage_peers.php');
 manage_page::setup($baseurl, get_string('managepeers', 'repository_largefile'));
 
+// Deleting a peer also revokes every share published to it, so confirm on a page
+// (a POSTed continue button) rather than with an inline script prompt.
 if ($action === 'delete' && $id) {
     require_sesskey();
-    peer_manager::delete($id);
-    redirect($baseurl, get_string('peerdeleted', 'repository_largefile'));
+    if (optional_param('confirm', 0, PARAM_BOOL)) {
+        peer_manager::delete($id);
+        redirect($baseurl, get_string('peerdeleted', 'repository_largefile'));
+    }
+    echo $OUTPUT->header();
+    echo $OUTPUT->confirm(
+        get_string('deletepeerconfirm', 'repository_largefile'),
+        new moodle_url($baseurl, ['action' => 'delete', 'id' => $id, 'confirm' => 1, 'sesskey' => sesskey()]),
+        $baseurl
+    );
+    echo $OUTPUT->footer();
+    exit;
 }
 
 $form = new peer_form($baseurl->out(false), ['id' => $id]);
@@ -86,8 +98,7 @@ if ($peers) {
         );
         $delete = html_writer::link(
             new moodle_url($baseurl, ['action' => 'delete', 'id' => $peer->id, 'sesskey' => sesskey()]),
-            get_string('delete'),
-            ['onclick' => "return confirm('" . get_string('deletepeerconfirm', 'repository_largefile') . "');"]
+            get_string('delete')
         );
         $table->data[] = [format_string($peer->name), s((string) $peer->baseurl), "$edit &nbsp; $delete"];
     }

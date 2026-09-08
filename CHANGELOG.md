@@ -2,6 +2,52 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.0 — 2026-09-08
+
+The remaining items from the stability and security review, all implemented as
+recommended. No schema change.
+
+- **Fix: share requests to a peer were built with `&amp;` between parameters.**
+  Moodle sets PHP's default query separator to the HTML-escaped `&amp;`, and the
+  receiving site's URLs were built with `http_build_query()` using that default —
+  so every parameter after the first arrived misnamed (`amp;action`) and the peer
+  refused the request. The separator is now given explicitly. Found by the new
+  request-building tests.
+- **Signed share requests keep their credential out of URLs.** The timestamp,
+  nonce and signature now travel in an `X-Largefile-Auth` request header instead of
+  the query string, so they no longer land in web-server, proxy or CDN access logs
+  on either site. The share endpoint accepts both forms, and a receiving site falls
+  back to the query-string form automatically when the sending site runs an older
+  release (the fallback will be removed in a later release — upgrade both sites).
+- **Peers must use https.** A peer Site URL is now refused unless it is `https://`;
+  a site that has to pair over plain http can opt in with the config-only flag
+  `allowinsecurepeers` (component `largefile`). Existing http peers keep working
+  until edited.
+- **A strong secret by default.** The *Add peer* form now fills in a freshly
+  generated 256-bit random secret to copy to the other site, instead of leaving an
+  administrator to invent a passphrase that could be brute-forced offline.
+- **Shares default to 3 downloads, not 1.** A download is counted when it starts,
+  so one cut off by a network fault used up a one-download share and forced the
+  publisher to re-encrypt and republish; the default now leaves room for a retry.
+  The help text explains the trade-off.
+- **The download cap is enforced atomically.** Two requests arriving together on
+  a share with one download left could both succeed; the check and the count now
+  happen under a row lock (`share_manager::claim_download()`).
+- **Deleting a peer revokes its shares.** Shares to a deleted peer could never be
+  downloaded again but their encrypted files lingered — indefinitely for a share
+  with no expiry. They are now removed with the peer, and the confirmation says so.
+- **Chunk uploads: size enforced, body streamed.** The upload endpoint now refuses
+  a chunk larger than twice the configured chunk size (HTTP 413) before reading it,
+  and spools an accepted body to a temporary stream instead of holding it in memory,
+  so a modified client cannot exhaust PHP's memory limit.
+- **Confirmation pages instead of inline scripts.** Deleting a peer and revoking a
+  share now go through Moodle's confirmation page (a POSTed continue button), like
+  the bulk actions on the Transfers page, rather than an inline `onclick` prompt.
+- **CI verifies the JavaScript build.** A new `amd-build` job rebuilds `amd/build`
+  with Moodle's grunt toolchain and fails on any difference, so a hand-built or
+  stale artefact (the cause of the 0.5.2 breakage) cannot reach `main` again; the
+  built modules are regenerated with that toolchain and the README explains how.
+
 ## 0.6.6 — 2026-09-07
 
 Stability and security review fixes. No schema change.

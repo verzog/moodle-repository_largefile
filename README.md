@@ -115,8 +115,23 @@ All three management pages are reached from the plugin's configuration page
 
 **Pairing.** On each site, open **Trusted peers** from that configuration page,
 add the other site with its **Site URL** (e.g. `https://peer.example.org`), and
-paste the same shared secret (≥24 characters) on both. The secret is stored
-encrypted with the site key (`\core\encryption`), never in the clear.
+use the same shared secret on both: the *Add peer* form fills in a freshly
+generated 256-bit random secret — copy it to the other site, or paste the one the
+other site generated (≥24 characters; avoid a memorable phrase, which can be
+brute-forced offline from a captured request). The secret is stored encrypted with
+the site key (`\core\encryption`), never in the clear.
+
+The Site URL must use **https**: the signed download requests and the encrypted
+backup travel to it. A site that genuinely has to pair over plain http (a lab, an
+isolated internal network) can opt in with a config-only flag — there is
+deliberately no setting for it in the UI:
+
+```
+php admin/cli/cfg.php --component=largefile --name=allowinsecurepeers --set=1
+```
+
+Deleting a peer revokes every share published to it (and deletes their encrypted
+files), since nothing could download them any more.
 
 The Site URL does double duty: a share link is accepted only if it is on the same
 origin (scheme, host and port) as the peer it is imported from, and that one origin
@@ -153,7 +168,17 @@ in one click.
 **Request authentication.** Every request to the share endpoint is signed with
 HMAC-SHA256 over the canonicalised parameters and carries a timestamp (a ±5-minute
 window) and a single-use nonce, so a captured link cannot be replayed. The
-signature is checked with `hash_equals` before the nonce is claimed.
+signature is checked with `hash_equals` before the nonce is claimed. Since 0.7.0 the
+timestamp, nonce and signature travel in an `X-Largefile-Auth` request header
+rather than the URL, so they never land in web-server, proxy or CDN access logs;
+the endpoint still accepts the older query-string form, and a receiving site falls
+back to it automatically when the sending site runs an older release. The
+query-string form will be removed in a later release, so upgrade both sites.
+
+A download is counted the moment it starts (under a row lock, so two requests
+cannot share the last permitted download), which means one cut off by a network
+fault still uses up an attempt — the default cap is therefore 3, leaving room for a
+retry without republishing a multi-gigabyte backup.
 
 **Capabilities.** Sharing and importing are gated by
 `repository/largefile:share` and `repository/largefile:import` (both at the system
@@ -224,10 +249,21 @@ scheduled transfer, which runs on the server with no page open.
 CI (`.github/workflows/moodle-ci.yml`) runs `moodle-plugin-ci` against a real
 Moodle across PHP 8.2–8.4 × Moodle 5.0–5.2 × pgsql/mariadb/mysqli, with the same
 blocking checks Moodle plugins use: `phplint`, `phpcs`, `phpdoc`, `validate`,
-`savepoints`, `mustache` and `phpunit`. To reproduce locally, install
-`moodle-plugin-ci` and run those steps against a checkout of this repository.
+`savepoints`, `mustache` and `phpunit`. A separate `amd-build` job rebuilds the
+JavaScript with Moodle's grunt and fails if `amd/build/` differs from the commit.
+To reproduce locally, install `moodle-plugin-ci` and run those steps against a
+checkout of this repository.
 
-After editing `amd/src/upload.js`, rebuild `amd/build/` with `grunt amd`.
+After editing anything under `amd/src/`, rebuild `amd/build/` with Moodle's own
+toolchain — the plugin has no Gruntfile of its own. From a Moodle checkout that
+contains this plugin at `repository/largefile` and has had `npm ci` run:
+
+```
+npx grunt amd --root=repository/largefile
+```
+
+Commit the regenerated `amd/build/*.min.js` and `.map` files with the source
+change; CI rejects a build that does not match.
 
 ## Licence
 

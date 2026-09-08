@@ -118,6 +118,22 @@ if (!$tokencontext) {
 }
 $requirerepoaccess($tokencontext);
 
+// Refuse a chunk larger than the server allows before reading its body, and spool
+// an accepted body to a temporary stream rather than holding it in memory. Sends a
+// 413 so the uploader reports "chunk too large" rather than a generic failure.
+$maxchunk = chunk_store::max_chunk_bytes();
+$readchunk = function (int $expected) use ($maxchunk, $senderror) {
+    if ($expected > $maxchunk) {
+        http_response_code(413);
+        $senderror(get_string('errorchunktoolarge', 'repository_largefile'));
+    }
+    $body = chunk_store::spool_request_body($expected);
+    if ($body === null) {
+        $senderror(get_string('erroruploadfailed', 'repository_largefile'));
+    }
+    return $body;
+};
+
 switch ($action) {
     case 'start':
         $start = optional_param('start', null, PARAM_INT);
@@ -128,8 +144,8 @@ switch ($action) {
         if ($start === null || $end === null) {
             $senderror('Param start or end is missing');
         }
-        $content = file_get_contents('php://input', false, null, 0, $end);
-        $error = chunk_store::apply_start($record, $start, $end, $length, $filename, (string) $content);
+        $content = $readchunk($end - $start);
+        $error = chunk_store::apply_start($record, $start, $end, $length, $filename, $content);
         if ($error !== null) {
             $senderror($error);
         }
@@ -147,8 +163,8 @@ switch ($action) {
         if ($bounds !== null) {
             $senderror($bounds);
         }
-        $content = file_get_contents('php://input', false, null, 0, $end - $start);
-        $error = chunk_store::apply_proceed($record, $start, $end, (string) $content);
+        $content = $readchunk($end - $start);
+        $error = chunk_store::apply_proceed($record, $start, $end, $content);
         if ($error !== null) {
             $senderror($error);
         }
@@ -175,8 +191,8 @@ switch ($action) {
             http_response_code(400);
             $senderror('Param start or end is missing');
         }
-        $content = file_get_contents('php://input', false, null, 0, $end - $start);
-        $result = chunk_store::write_range($record, $start, $end, (string) $content);
+        $content = $readchunk($end - $start);
+        $result = chunk_store::write_range($record, $start, $end, $content);
         if (is_string($result)) {
             // Background Fetch judges a request by its HTTP status, not the JSON body,
             // so a failed chunk must return a non-2xx status — otherwise the browser

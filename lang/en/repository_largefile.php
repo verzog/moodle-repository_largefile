@@ -45,7 +45,8 @@ $string['confirmremoveallcompleted'] = 'Remove all completed-but-unused uploads 
 $string['confirmremoveallstalled'] = 'Remove all in-progress uploads and their partial files? This frees the disk they '
     . 'use, but any upload that is still genuinely streaming will be interrupted.';
 $string['createshare'] = 'Create share';
-$string['deletepeerconfirm'] = 'Delete this peer? Existing shares to it will stop working.';
+$string['deletepeerconfirm'] = 'Delete this peer? Every share published to it will be revoked and its encrypted file '
+    . 'deleted; the peer will no longer be able to download anything from this site.';
 $string['destination_backuparea'] = 'Private backup area (restore)';
 $string['destination_coursebackup'] = 'A course\'s backup area (restore)';
 $string['destination_picker'] = 'Large file picker (general use)';
@@ -65,6 +66,8 @@ $string['erroremptyfile'] = 'The selected file is empty.';
 $string['errornocoursebackupcap'] = 'You do not have permission to add a backup to that course.';
 $string['errornocoursechosen'] = 'Choose the course whose backup area the file should go to.';
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
+$string['errorpeerinsecureurl'] = 'The peer\'s site URL must use https. Signed download requests and the encrypted backup '
+    . 'travel to this address, so a plain http peer is not accepted.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
@@ -142,8 +145,10 @@ $string['peername'] = 'Peer name';
 $string['peersaved'] = 'Peer saved.';
 $string['peersecret'] = 'Shared secret';
 $string['peersecret_help'] = 'A long random string known to both sites, exchanged out of band (not over email in the '
-    . 'clear). It is stored encrypted and never travels in a link — it only signs requests. Leave blank when editing to '
-    . 'keep the current secret.';
+    . 'clear). It is stored encrypted and never travels in a link — it only signs requests. When adding a peer a freshly '
+    . 'generated random secret is filled in for you: copy it to the other site, or replace it with the value the other '
+    . 'site\'s administrator gave you. Avoid a memorable phrase — it can be guessed offline from a captured request. '
+    . 'Leave blank when editing to keep the current secret.';
 $string['peerurl'] = 'Site URL';
 $string['peerurl_help'] = 'The peer site\'s address, for example https://peer.example.org. Its host is the one address '
     . 'allowed past this site\'s outgoing request block when importing that peer\'s share, so a peer on a private or '
@@ -217,7 +222,8 @@ $string['sharelinkinfo'] = 'Give this link to the receiving site\'s administrato
     . 'trusted peer there, using the same shared secret.';
 $string['sharemaxdownloads'] = 'Maximum downloads';
 $string['sharemaxdownloads_help'] = 'How many times the share may be downloaded before it stops working. Use 0 for no '
-    . 'limit. A one-time share (1) is the safest default.';
+    . 'limit. A download counts from the moment it starts, so one cut off by a network fault still uses up an attempt; '
+    . 'the default of 3 leaves room for a retry or two without leaving the share open indefinitely.';
 $string['sharepeer'] = 'Share with peer';
 $string['sharepublishbackground'] = 'Create in the background';
 $string['sharepublishbackground_help'] = 'Recommended for large backups. The backup is encrypted on the server rather '

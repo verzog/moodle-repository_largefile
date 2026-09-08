@@ -628,7 +628,8 @@ const fetchUrl = async(url, token, controller) => {
     }
     const response = parseJson(result.text);
     if (result.status !== 200 || response === null || response.error !== undefined) {
-        throw new Error(response && response.error ? response.error : await getString('errordownloadfailed', 'repository_largefile'));
+        throw new Error(response && response.error
+            ? response.error : await getString('errordownloadfailed', 'repository_largefile'));
     }
     return true;
 };

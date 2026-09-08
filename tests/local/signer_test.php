@@ -117,4 +117,52 @@ final class signer_test extends \advanced_testcase {
         $window = (new \ReflectionClassConstant(signer::class, 'TIME_WINDOW'))->getValue();
         $this->assertGreaterThanOrEqual(2 * $window, signer::nonce_retention());
     }
+
+    /**
+     * Signing for header transport leaves only the signed parameters in the query and
+     * carries ts/nonce/sig in a header that parses back to values which verify.
+     *
+     * @return void
+     */
+    public function test_header_transport_round_trip(): void {
+        $this->resetAfterTest();
+        $secret = crypto::generate_secret();
+        $signed = signer::sign_for_header(['token' => 'abc', 'action' => 'meta'], $secret);
+
+        $this->assertSame(['token' => 'abc', 'action' => 'meta'], $signed['params']);
+        $this->assertStringStartsWith(signer::AUTH_HEADER . ': ', $signed['header']);
+
+        $value = substr($signed['header'], strlen(signer::AUTH_HEADER) + 2);
+        $auth = signer::parse_auth_header($value);
+        $this->assertNotNull($auth);
+        $this->assertNull(signer::verify($signed['params'] + $auth, $secret));
+        // The same credential cannot be presented twice.
+        $this->assertSame('errorsharereplay', signer::verify($signed['params'] + $auth, $secret));
+    }
+
+    /**
+     * A malformed auth header is rejected outright rather than partially parsed.
+     *
+     * @dataProvider bad_header_provider
+     * @param string $value The header value.
+     * @return void
+     */
+    public function test_malformed_auth_header_rejected(string $value): void {
+        $this->assertNull(signer::parse_auth_header($value));
+    }
+
+    /**
+     * Cases for test_malformed_auth_header_rejected.
+     *
+     * @return array
+     */
+    public static function bad_header_provider(): array {
+        return [
+            'empty' => [''],
+            'missing sig' => ['ts=1,nonce=ab'],
+            'unknown key' => ['ts=1,nonce=ab,sig=cd,extra=1'],
+            'non-alphanumeric value' => ['ts=1,nonce=ab,sig=cd&x'],
+            'duplicate key' => ['ts=1,ts=2,sig=cd'],
+        ];
+    }
 }
