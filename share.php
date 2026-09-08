@@ -41,6 +41,12 @@ use repository_largefile\local\signer;
 $token = required_param('token', PARAM_ALPHANUM);
 $action = required_param('action', PARAM_ALPHA);
 
+// Every response — success or rejection — carries the protocol marker, so a
+// receiving site can tell this release (which reads the auth header) apart from an
+// older one whose error page lacks it, and only fall back to query-string signing
+// for the latter.
+header('X-Largefile-Protocol: 2');
+
 // Send a status with a short message and stop. Kept deliberately vague so the
 // endpoint cannot be used to probe for valid tokens.
 $reject = function (int $status, string $message): void {

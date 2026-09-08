@@ -344,10 +344,22 @@ final class chunk_store_test extends \advanced_testcase {
      */
     public function test_max_chunk_bytes_follows_setting(): void {
         $this->resetAfterTest();
+        $this->setAdminUser();
         unset_config('chunksize', 'largefile');
         $this->assertSame(2 * 20 * 1024 * 1024, chunk_store::max_chunk_bytes());
+
+        // A token issued under the 20 MB setting keeps its cap after the setting is
+        // lowered, so an upload in progress can still finish; a new token gets the
+        // lower cap.
+        $old = chunk_store::create_token(\context_system::instance()->id, -1);
+        $this->assertSame(20 * 1024 * 1024, (int) chunk_store::get_record($old)->chunksize);
         set_config('chunksize', 5, 'largefile');
         $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes());
+        $this->assertSame(2 * 20 * 1024 * 1024, chunk_store::max_chunk_bytes(chunk_store::get_record($old)));
+        $new = chunk_store::create_token(\context_system::instance()->id, -1);
+        $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes(chunk_store::get_record($new)));
+        // A row from before the column existed falls back to the setting.
+        $this->assertSame(2 * 5 * 1024 * 1024, chunk_store::max_chunk_bytes((object) ['chunksize' => null]));
     }
 
     /**

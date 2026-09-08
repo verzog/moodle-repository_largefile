@@ -92,6 +92,19 @@ final class share_client_test extends \advanced_testcase {
     }
 
     /**
+     * The protocol marker is recognised case-insensitively and its absence marks an
+     * endpoint that predates header authentication.
+     *
+     * @return void
+     */
+    public function test_has_protocol_marker(): void {
+        $this->assertTrue(share_client::has_protocol_marker(['X-Largefile-Protocol' => '2']));
+        $this->assertTrue(share_client::has_protocol_marker(['x-largefile-protocol' => '2', 'Content-Type' => 'a']));
+        $this->assertFalse(share_client::has_protocol_marker(['Content-Type' => 'text/html']));
+        $this->assertFalse(share_client::has_protocol_marker([]));
+    }
+
+    /**
      * The header form keeps the credential out of the URL, the legacy form puts it in
      * the query string; both carry the same signed parameters.
      *

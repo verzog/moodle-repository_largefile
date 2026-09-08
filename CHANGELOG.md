@@ -5,7 +5,8 @@ All notable changes to `repository_largefile` are documented here.
 ## 0.7.0 — 2026-09-08
 
 The remaining items from the stability and security review, all implemented as
-recommended. No schema change.
+recommended. One schema change: a nullable `chunksize` column on the chunks table
+(added by upgrade) records the chunk size issued with each upload token.
 
 - **Fix: share requests to a peer were built with `&amp;` between parameters.**
   Moodle sets PHP's default query separator to the HTML-escaped `&amp;`, and the
@@ -16,9 +17,12 @@ recommended. No schema change.
 - **Signed share requests keep their credential out of URLs.** The timestamp,
   nonce and signature now travel in an `X-Largefile-Auth` request header instead of
   the query string, so they no longer land in web-server, proxy or CDN access logs
-  on either site. The share endpoint accepts both forms, and a receiving site falls
-  back to the query-string form automatically when the sending site runs an older
-  release (the fallback will be removed in a later release — upgrade both sites).
+  on either site. The share endpoint accepts both forms and marks every reply with
+  an `X-Largefile-Protocol` header; a receiving site falls back to the query-string
+  form only when the sending site's reply lacks that marker (an older release), never
+  on a transport error or a current peer's rejection. Signed requests no longer
+  follow redirects, so the credential can only ever reach the peer itself. (The
+  fallback will be removed in a later release — upgrade both sites.)
 - **Peers must use https.** A peer Site URL is now refused unless it is `https://`;
   a site that has to pair over plain http can opt in with the config-only flag
   `allowinsecurepeers` (component `largefile`). Existing http peers keep working
@@ -37,9 +41,12 @@ recommended. No schema change.
   downloaded again but their encrypted files lingered — indefinitely for a share
   with no expiry. They are now removed with the peer, and the confirmation says so.
 - **Chunk uploads: size enforced, body streamed.** The upload endpoint now refuses
-  a chunk larger than twice the configured chunk size (HTTP 413) before reading it,
-  and spools an accepted body to a temporary stream instead of holding it in memory,
-  so a modified client cannot exhaust PHP's memory limit.
+  a chunk larger than twice the chunk size — judged by the declared range and by the
+  request's Content-Length — with HTTP 413 before reading it, and spools an accepted
+  body to a temporary stream instead of holding it in memory, so a modified client
+  cannot exhaust PHP's memory limit. The cap honours the chunk size issued with the
+  upload's token (new `chunksize` column), so an upload already running keeps working
+  if an administrator lowers the setting.
 - **Confirmation pages instead of inline scripts.** Deleting a peer and revoking a
   share now go through Moodle's confirmation page (a POSTed continue button), like
   the bulk actions on the Transfers page, rather than an inline `onclick` prompt.

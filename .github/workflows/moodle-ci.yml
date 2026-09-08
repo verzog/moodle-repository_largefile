@@ -198,3 +198,11 @@ jobs:
 
       - name: Grunt (rebuild amd/build, lint JS) and fail on any difference
         run: moodle-plugin-ci grunt --max-lint-warnings 0
+
+      # moodle-plugin-ci grunt already fails when the build changes tracked files; this
+      # makes the intent explicit and shows the diff when it does.
+      - name: Fail if the rebuilt amd/build differs from the commit
+        run: |
+          cd moodle/repository/largefile
+          git status --porcelain -- amd/build
+          git diff --exit-code -- amd/build

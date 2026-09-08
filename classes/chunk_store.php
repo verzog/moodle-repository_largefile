@@ -79,6 +79,7 @@ class chunk_store {
         $record->state = self::STATE_UNUSED;
         $record->currentpos = 0;
         $record->length = 0;
+        $record->chunksize = self::configured_chunk_bytes();
         $record->lastmodified = time();
         $DB->insert_record_raw(self::TABLE, $record, false, false, true);
         return $id;
@@ -112,6 +113,7 @@ class chunk_store {
         $record->state = self::STATE_UNUSED;
         $record->currentpos = 0;
         $record->length = 0;
+        $record->chunksize = self::configured_chunk_bytes();
         $record->lastmodified = time();
         $DB->insert_record_raw(self::TABLE, $record, false, false, true);
         return $id;
@@ -237,18 +239,32 @@ class chunk_store {
     }
 
     /**
-     * The largest chunk body the endpoint accepts: twice the configured chunk size,
-     * so a resumed upload whose token was issued under a larger setting still
-     * finishes, while a modified client cannot post an arbitrarily large body.
+     * The chunk size the admin setting currently asks clients to use, in bytes, with
+     * a 20 MB fallback so a missing or zero setting can never stall the uploader.
      *
      * @return int Bytes.
      */
-    public static function max_chunk_bytes(): int {
+    public static function configured_chunk_bytes(): int {
         $chunkmb = (int) get_config('largefile', 'chunksize');
         if ($chunkmb <= 0) {
             $chunkmb = 20;
         }
-        return 2 * $chunkmb * 1024 * 1024;
+        return $chunkmb * 1024 * 1024;
+    }
+
+    /**
+     * The largest chunk body the endpoint accepts for an upload: twice the larger
+     * of the current setting and the chunk size issued with the upload's token. So
+     * an upload started before an administrator lowered the setting still finishes
+     * (its client keeps sending the size it was issued), while a modified client
+     * cannot post an arbitrarily large body.
+     *
+     * @param \stdClass|null $record The token row, or null for a not-yet-issued token.
+     * @return int Bytes.
+     */
+    public static function max_chunk_bytes(?\stdClass $record = null): int {
+        $issued = $record !== null ? (int) ($record->chunksize ?? 0) : 0;
+        return 2 * max(self::configured_chunk_bytes(), $issued);
     }
 
     /**

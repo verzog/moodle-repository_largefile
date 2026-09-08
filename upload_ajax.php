@@ -90,13 +90,10 @@ if ($action === 'newtoken') {
     if ($id === null) {
         $senderror(get_string('erroruploadfailed', 'repository_largefile'));
     }
-    // Chunk size in bytes, from the admin setting, with a 20 MB fallback so a
-    // missing or zero setting can never stall the uploader.
-    $chunkmb = (int) get_config('largefile', 'chunksize');
-    if ($chunkmb <= 0) {
-        $chunkmb = 20;
-    }
-    echo json_encode((object) ['id' => $id, 'maxbytes' => $maxbytes, 'chunksize' => $chunkmb * 1024 * 1024]);
+    // The chunk size the client must use, recorded with the token so the server
+    // keeps accepting it even if the setting is lowered while the upload is running.
+    $chunkbytes = chunk_store::configured_chunk_bytes();
+    echo json_encode((object) ['id' => $id, 'maxbytes' => $maxbytes, 'chunksize' => $chunkbytes]);
     die;
 }
 
@@ -118,14 +115,23 @@ if (!$tokencontext) {
 }
 $requirerepoaccess($tokencontext);
 
-// Refuse a chunk larger than the server allows before reading its body, and spool
-// an accepted body to a temporary stream rather than holding it in memory. Sends a
-// 413 so the uploader reports "chunk too large" rather than a generic failure.
-$maxchunk = chunk_store::max_chunk_bytes();
+// Refuse a chunk larger than the server allows before reading its body — judged by
+// the declared range and, when the request carries one, by its Content-Length, so a
+// client cannot declare a tiny range while sending a huge body — and spool an
+// accepted body to a temporary stream rather than holding it in memory. Sends a 413
+// so the uploader reports "chunk too large" rather than a generic failure. The cap
+// honours the chunk size issued with this token, not just the current setting.
+$maxchunk = chunk_store::max_chunk_bytes($record);
 $readchunk = function (int $expected) use ($maxchunk, $senderror) {
-    if ($expected > $maxchunk) {
+    $declared = isset($_SERVER['CONTENT_LENGTH']) && $_SERVER['CONTENT_LENGTH'] !== ''
+        ? (int) $_SERVER['CONTENT_LENGTH'] : null;
+    if ($expected > $maxchunk || ($declared !== null && $declared > $maxchunk)) {
         http_response_code(413);
         $senderror(get_string('errorchunktoolarge', 'repository_largefile'));
+    }
+    if ($declared !== null && $declared !== $expected) {
+        http_response_code(400);
+        $senderror('Filechunk is not as long as it should be.');
     }
     $body = chunk_store::spool_request_body($expected);
     if ($body === null) {
