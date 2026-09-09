@@ -2,6 +2,28 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.4 — 2026-09-09
+
+One-click routing and restore for completed chunked uploads. A large course backup
+uploaded through the picker no longer has to be re-selected through the (slow)
+file picker to restore it. No schema change.
+
+- **New action *Send to…* on Completed uploads.** Route a staged file straight
+  into a real destination — private backup area, a course's backup area, or
+  private files — without reopening the large-file picker. The destinations
+  offered are the site's enabled destinations narrowed to the file's kind, and
+  the course backup area still requires `moodle/restore:uploadfile` on the
+  chosen course. On success the chunk row is cleared and the file lands where
+  it can actually be used.
+- **New action *Restore…* on Completed uploads (for .mbz files).** Copy the
+  backup into a chosen course's backup area and land the user directly on
+  Moodle's restore wizard for that file — the same URL Moodle uses when the
+  user clicks Restore next to a file in the course backup area. The course
+  picker is limited to courses where the user holds both
+  `moodle/restore:uploadfile` and `moodle/restore:restorecourse`, both
+  re-checked on submit; if the stored file cannot be resolved back to a
+  pathnamehash the user is dropped on the course's restore-file page instead.
+
 ## 0.7.3 — 2026-09-08
 
 Long-transfer fixes: peer imports and URL imports of many-gigabyte files were being

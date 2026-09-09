@@ -296,7 +296,28 @@ class manage_page {
         ];
         foreach ($completed as $row) {
             $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
-            $remove = \html_writer::link(
+            // Send the file straight to a real destination (backup area, course
+            // backup area, private files) without the user having to reopen the
+            // large-file picker to select it — a slow step for a big backup.
+            $send = \html_writer::link(
+                new \moodle_url($baseurl, ['action' => 'sendcompleted', 'uploadid' => $row->id, 'sesskey' => sesskey()]),
+                get_string('sendcompleted', 'repository_largefile')
+            );
+            $actions = [$send];
+            // Restore a course backup directly on a chosen course. Only shown for
+            // .mbz files (the only kind the Moodle restore wizard reads), so a
+            // SCORM or video row is not offered a restore link that would fail.
+            if (import_policy::detect_type((string) $row->filename) === import_policy::TYPE_BACKUP) {
+                $actions[] = \html_writer::link(
+                    new \moodle_url($baseurl, [
+                        'action' => 'restorecompleted',
+                        'uploadid' => $row->id,
+                        'sesskey' => sesskey(),
+                    ]),
+                    get_string('restorecompleted', 'repository_largefile')
+                );
+            }
+            $actions[] = \html_writer::link(
                 new \moodle_url($baseurl, ['action' => 'removecompleted', 'uploadid' => $row->id, 'sesskey' => sesskey()]),
                 get_string('remove')
             );
@@ -305,7 +326,7 @@ class manage_page {
                 format_string((string) $row->filename),
                 display_size((int) $row->length),
                 userdate((int) $row->lastmodified),
-                $remove,
+                implode(' · ', $actions),
             ];
         }
         return \html_writer::table($table);
