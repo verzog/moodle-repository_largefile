@@ -97,14 +97,22 @@ let swRegistrationPromise = null;
 /** @var {boolean} Whether the module-level service-worker message listener is set. */
 let swMessageListenerRegistered = false;
 
-/** @var {Array} Picker-refresh callbacks to run when a background upload completes. */
-const bgCompletionCallbacks = [];
+/**
+ * @var {Map<string,Function>} Completion callbacks keyed by the Background
+ * Fetch registration id, so the service worker's `bgcomplete` message wakes
+ * only the callback that belongs to the upload that finished — not every
+ * callback registered by every upload on the page. Without this, two
+ * concurrent background uploads on the same page would fire each other's
+ * success notification on the first one to complete.
+ */
+const bgCompletionCallbacks = new Map();
 
 /**
  * Register (once, at module scope so it outlives any dialogue) a listener for the
- * service worker's background-fetch completion message, refreshing every picker
- * that handed off a background upload. The per-dialogue listener would be gone by
- * the time the upload finishes, so completion is handled here instead.
+ * service worker's background-fetch completion message, waking only the
+ * callback registered for the completed upload's Background Fetch registration
+ * id. The per-dialogue listener would be gone by the time the upload finishes,
+ * so completion is handled here instead.
  *
  * @return {void}
  */
@@ -114,8 +122,13 @@ const ensureSwMessageListener = () => {
     }
     swMessageListenerRegistered = true;
     navigator.serviceWorker.addEventListener('message', (e) => {
-        if (e.data && e.data.type === 'repository_largefile_bgcomplete') {
-            bgCompletionCallbacks.forEach((callback) => callback());
+        if (!e.data || e.data.type !== 'repository_largefile_bgcomplete' || !e.data.id) {
+            return;
+        }
+        const callback = bgCompletionCallbacks.get(e.data.id);
+        if (callback) {
+            bgCompletionCallbacks.delete(e.data.id);
+            callback();
         }
     });
 };
@@ -928,8 +941,12 @@ const openUploadModal = async(data) => {
         await startBackgroundUpload(file, bgtoken);
         // Handoff succeeded: the browser owns the upload now. Refresh the picker when
         // it completes (a module-level listener, since this dialogue will be gone).
+        // Key the callback by the Background Fetch registration id — the same id
+        // the service worker attaches to its completion message — so this upload's
+        // callback fires only when this upload finishes, not when any other
+        // concurrent background upload from the same page does.
         ensureSwMessageListener();
-        bgCompletionCallbacks.push(data.callback);
+        bgCompletionCallbacks.set('repository_largefile-' + bgtoken.id, data.callback);
         backgroundHandedOff = true;
         controller.token = null;
         // Remember it in the background store (keyed by token, not the per-context
@@ -1114,4 +1131,44 @@ const registerEventListeners = () => {
  */
 export const init = () => {
     registerEventListeners();
+};
+
+/**
+ * Initialise the standalone Upload page (Transfers → Upload tab): bind the
+ * given trigger button so clicking it opens the same dialogue the file picker
+ * opens on its upload event. The completion callback surfaces a Moodle
+ * notification pointing back at the Transfers page rather than closing the
+ * page, so an admin can start another upload without navigating away.
+ *
+ * @param {object} data The bootstrap payload from the page:
+ *        {contextId, transfersUrl, trigger}.
+ * @return {void}
+ */
+export const initStandalone = (data) => {
+    const trigger = document.querySelector(data.trigger);
+    if (!trigger) {
+        return;
+    }
+    trigger.addEventListener('click', () => {
+        openUploadModal({
+            repoId: 0,
+            contextId: data.contextId,
+            callback: async() => {
+                const [ok, go] = await Promise.all([
+                    getString('uploadtabsuccess', 'repository_largefile'),
+                    getString('uploadtabgotransfers', 'repository_largefile'),
+                ]);
+                const link = document.createElement('a');
+                link.href = data.transfersUrl;
+                link.textContent = go;
+                const span = document.createElement('span');
+                span.textContent = ok + ' ';
+                span.appendChild(link);
+                Notification.addNotification({
+                    type: 'success',
+                    message: span.outerHTML,
+                });
+            },
+        });
+    });
 };

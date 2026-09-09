@@ -2,6 +2,23 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.7 — 2026-09-09
+
+- **New Upload a large file tab.** The plugin's chunked uploader is normally
+  reached from the file picker inside a course activity's *Choose file*
+  dialogue — a slow step for a large backup whose only use case is to route it
+  through Send to… or Restore… on the Transfers page anyway. A new
+  `upload.php` standalone page hosts the same dialogue as its own tab, so an
+  admin can start a large upload without opening a course activity first. On
+  completion the file lands as a `chunk_store` row in `STATE_COMPLETED`,
+  exactly where the Transfers page's *Completed uploads* section reads it,
+  ready for Send to… / Restore…. The tab is offered only to a user who
+  could also use the picker (holds `repository/largefile:view` and the picker
+  is an enabled destination site-wide); the direct URL applies the same
+  gates. On upload completion the page shows a success notification with a
+  link back to Transfers rather than navigating away, so the operator can
+  start another upload or dismiss and go route the file.
+
 ## 0.7.6 — 2026-09-09
 
 Orphan-row cleanup + Send/Restore fast-fail. When the chunk-area file has
