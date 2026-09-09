@@ -128,7 +128,7 @@ if ($action === 'sendcompleted') {
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
-        redirect($baseurl, get_string('uploadalreadyfinished', 'repository_largefile'));
+        redirect($baseurl, get_string('completeduploadgone', 'repository_largefile'));
     }
     $type = import_policy::detect_type((string) $record->filename);
     $destinations = [];
@@ -178,11 +178,11 @@ if ($action === 'sendcompleted') {
         try {
             $fresh = chunk_store::get_record($record->id);
             if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
-                $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                $notice = get_string('completeduploadgone', 'repository_largefile');
             } else {
                 $srcpath = chunk_store::get_path_for_id($fresh->id);
                 if (!$srcpath || !file_exists($srcpath)) {
-                    $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                    $notice = get_string('completeduploadnofile', 'repository_largefile');
                 } else {
                     // Hashing and copying a multi-gigabyte file into the file pool
                     // is synchronous and can outlast a 30- or 60-second web
@@ -251,7 +251,7 @@ if ($action === 'restorecompleted') {
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
-        redirect($baseurl, get_string('uploadalreadyfinished', 'repository_largefile'));
+        redirect($baseurl, get_string('completeduploadgone', 'repository_largefile'));
     }
     if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
         redirect($baseurl, get_string('errorrestorenotbackup', 'repository_largefile'));
@@ -302,12 +302,12 @@ if ($action === 'restorecompleted') {
             $fresh = chunk_store::get_record($record->id);
             if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
                 $redirecturl = $baseurl;
-                $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                $notice = get_string('completeduploadgone', 'repository_largefile');
             } else {
                 $srcpath = chunk_store::get_path_for_id($fresh->id);
                 if (!$srcpath || !file_exists($srcpath)) {
                     $redirecturl = $baseurl;
-                    $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                    $notice = get_string('completeduploadnofile', 'repository_largefile');
                 } else {
                     // See the sendcompleted handler above: hashing and copying a
                     // multi-gigabyte file into the file pool must not run under

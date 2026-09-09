@@ -2,6 +2,19 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.5 — 2026-09-09
+
+- **Distinguishable messages for Send to… / Restore… failures.** Both actions
+  previously fell back to the Remove action's *"That upload had already
+  finished, so there was nothing to remove."* text on every early-exit path,
+  which is honest for Remove but wrong for the routing actions and hides
+  which condition actually tripped. Two new messages replace it in Send /
+  Restore: *"completed upload no longer available"* when the row has moved
+  on (picked into an activity, cleared by cleanup, already sent) and
+  *"row here but the file is missing on disk"* when the tracking row
+  survived but the payload did not. The Remove action keeps its own text.
+  Purely a diagnostic and UX change — no code path or state check changed.
+
 ## 0.7.4 — 2026-09-09
 
 One-click routing and restore for completed chunked uploads. A large course backup

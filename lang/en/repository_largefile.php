@@ -35,6 +35,8 @@ $string['bgupload_help'] = 'Uses your browser\'s background upload (Chrome and E
     . 'browser shows its own. Other browsers upload in the foreground instead (which you can resume if you navigate away).';
 $string['chooselargefile'] = 'Choose a large file';
 $string['cleanup_task'] = 'Clean up stale chunked uploads and expired shares';
+$string['completeduploadgone'] = 'That completed upload is no longer available — the cleanup task purged it, another admin removed it or already sent it to a destination, or its row was removed manually. Refresh the Transfers page to see the current list.';
+$string['completeduploadnofile'] = 'That completed upload\'s row is here but its file is missing on disk — the file was removed outside the plugin (a manual rm on the chunk area, a filesystem snapshot restore) or a row-delete failed while the file went. Remove the row from Completed uploads to clear it.';
 $string['completeduploads'] = 'Completed uploads';
 $string['completeduploads_desc'] = 'Files that finished uploading but were never selected into an activity, so they '
     . 'still occupy disk in the upload staging area until they are used or the cleanup task removes them. '
