@@ -2,6 +2,28 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.6 — 2026-09-09
+
+Orphan-row cleanup + Send/Restore fast-fail. When the chunk-area file has
+been removed outside the plugin (an operator rm on the chunk directory, a
+filesystem snapshot restore, a similar out-of-band edit) the tracking row
+survives with nothing to route: 0.7.4/0.7.5 surfaced this as a broken
+Send/Restore action, but never cleared the stray row. Two changes:
+
+- **Sweep orphan rows in the cleanup task.** After the usual retention
+  purges the task now walks STARTED and COMPLETED rows, and any row whose
+  payload is gone from disk is dropped through the locked, state-guarded
+  path (so a concurrent Send/Restore is not interleaved). STATE_UNUSED is
+  excluded because a missing file is normal there — the token was issued
+  but not yet written.
+- **Fast-fail Send… and Restore… on an already-orphan row.** The outer
+  entry check now also checks `file_exists()` on the payload; a row whose
+  file is already gone is redirected with the *completed upload's file
+  missing on disk* message immediately, instead of walking the operator
+  through the destination or course-picker form only to fail on submit.
+  The inner file-exists check under the token lock still stands for the
+  race window between GET and POST.
+
 ## 0.7.5 — 2026-09-09
 
 - **Distinguishable messages for Send to… / Restore… failures.** Both actions
