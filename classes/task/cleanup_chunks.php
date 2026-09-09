@@ -62,11 +62,41 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge(chunk_store::STATE_UNUSED, (int) $state0duration);
         $this->purge(chunk_store::STATE_STARTED, (int) $state1duration);
         $this->purge(chunk_store::STATE_COMPLETED, (int) $state2duration);
+        $this->purge_orphaned_rows();
         $this->purge_export_files();
         $this->purge_expired_shares();
         $this->purge_old_nonces();
         $this->purge_orphaned_publish_sources();
         $this->purge_old_transfers();
+    }
+
+    /**
+     * Drop any chunk row whose file has been externally removed — an operator's
+     * manual rm on the chunk area, a filesystem snapshot restore, or a similar
+     * out-of-band edit. Left behind, the row shows up in Completed uploads (or
+     * Uploads in progress) as an entry that cannot be routed, restored or
+     * resumed; sweeping it here means an admin never has to hunt down that state
+     * from the UI. Deletion goes through the locked, state-guarded path so a
+     * concurrent Send/Restore is not interleaved.
+     *
+     * @return void
+     */
+    private function purge_orphaned_rows(): void {
+        global $DB;
+        // Only STARTED and COMPLETED rows are expected to have a file on disk;
+        // an UNUSED row is a token issued but not yet written, so a missing
+        // file there is normal, not orphan state.
+        [$insql, $params] = $DB->get_in_or_equal(
+            [chunk_store::STATE_STARTED, chunk_store::STATE_COMPLETED],
+            SQL_PARAMS_NAMED
+        );
+        $rows = $DB->get_records_select(chunk_store::TABLE, "state $insql", $params, '', 'id, state');
+        foreach ($rows as $row) {
+            $path = chunk_store::get_path_for_id((string) $row->id);
+            if ($path !== null && !file_exists($path)) {
+                chunk_store::delete_in_state((string) $row->id, (int) $row->state);
+            }
+        }
     }
 
     /**

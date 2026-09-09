@@ -130,6 +130,15 @@ if ($action === 'sendcompleted') {
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
         redirect($baseurl, get_string('completeduploadgone', 'repository_largefile'));
     }
+    // Guard the destination form with a file-exists check too: an orphan row
+    // whose payload has been externally removed cannot be routed anywhere, and
+    // displaying the destination picker only to fail on submit wastes the
+    // operator's time. The inner file-exists check under the lock still stands,
+    // for the race window between this GET and the eventual POST.
+    $srcpath = chunk_store::get_path_for_id($record->id);
+    if (!$srcpath || !file_exists($srcpath)) {
+        redirect($baseurl, get_string('completeduploadnofile', 'repository_largefile'));
+    }
     $type = import_policy::detect_type((string) $record->filename);
     $destinations = [];
     foreach (import_policy::destinations_for($type) as $dest) {
@@ -252,6 +261,12 @@ if ($action === 'restorecompleted') {
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
         redirect($baseurl, get_string('completeduploadgone', 'repository_largefile'));
+    }
+    // See the sendcompleted handler: bail on a row whose file is already gone
+    // instead of walking the operator through the course picker only to fail.
+    $srcpath = chunk_store::get_path_for_id($record->id);
+    if (!$srcpath || !file_exists($srcpath)) {
+        redirect($baseurl, get_string('completeduploadnofile', 'repository_largefile'));
     }
     if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
         redirect($baseurl, get_string('errorrestorenotbackup', 'repository_largefile'));
