@@ -31,18 +31,30 @@
  */
 
 require(__DIR__ . '/../../config.php');
+require_once($CFG->dirroot . '/repository/lib.php');
 
 use repository_largefile\local\import_policy;
 use repository_largefile\local\manage_page;
 
 require_login();
 $context = context_system::instance();
-// Only offer this page to a user who could also use the picker's uploader: the
-// view capability plus the picker as an enabled destination site-wide. With the
-// picker disabled the uploader stages nothing on either path, so the tab is
-// hidden and this direct URL returns the same rejection the picker would.
+// This page's whole point is to route a completed upload through the Transfers
+// page (Send to… / Restore…), so require the same capability Transfers itself
+// requires; without it, both next-step links this page presents would be
+// rejected there and the operator would be left with a staged file they
+// cannot use. That in turn requires the picker's own gate — the view
+// capability, and the picker as an enabled destination site-wide — because
+// the uploader stages nothing on either path with the picker off.
 require_capability('repository/largefile:view', $context);
+require_capability('repository/largefile:import', $context);
 if (!import_policy::picker_enabled()) {
+    throw new \moodle_exception('errorpickerdisabled', 'repository_largefile');
+}
+// The upload_ajax.php endpoint also refuses tokens when the repository type is
+// disabled or hidden site-wide, so a page that could not actually accept an
+// upload should not advertise the tab or the Start-upload button.
+$repotype = repository::get_type_by_typename('largefile');
+if (!$repotype || !$repotype->get_visible()) {
     throw new \moodle_exception('errorpickerdisabled', 'repository_largefile');
 }
 

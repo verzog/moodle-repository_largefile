@@ -408,11 +408,18 @@ class manage_page {
                 get_string('transfers', 'repository_largefile')
             );
         }
-        // The upload tab hosts the same chunked uploader the file picker uses, so it
-        // is only reachable by a user who could also reach the picker: they hold the
-        // view capability, and the picker itself is an enabled destination site-wide
-        // (with picker disabled the uploader stages nothing anyway).
-        if (has_capability('repository/largefile:view', $context) && import_policy::picker_enabled()) {
+        // The upload tab hosts the same chunked uploader the file picker uses. It
+        // is offered only to a user who can reach the picker AND the Transfers page
+        // its completed-upload flow routes through — the view capability and the
+        // import capability, plus the picker as an enabled destination site-wide
+        // (with picker disabled the uploader stages nothing anyway) and the plugin's
+        // repository type visible (upload_ajax.php refuses tokens otherwise).
+        if (
+            has_capability('repository/largefile:view', $context)
+                && has_capability('repository/largefile:import', $context)
+                && import_policy::picker_enabled()
+                && self::largefile_repotype_visible()
+        ) {
             $tabs[] = new \tabobject(
                 'upload',
                 new \moodle_url('/repository/largefile/upload.php'),
@@ -420,5 +427,22 @@ class manage_page {
             );
         }
         return $OUTPUT->tabtree($tabs, $active);
+    }
+
+    /**
+     * Whether the plugin's repository type is currently enabled and visible.
+     *
+     * Mirrors the site-visibility check upload_ajax.php applies before allocating
+     * an upload token, so the Upload tab (and its landing page) does not
+     * advertise a nonfunctional uploader when an administrator has disabled or
+     * hidden the repository type.
+     *
+     * @return bool True when the type exists and is visible.
+     */
+    private static function largefile_repotype_visible(): bool {
+        global $CFG;
+        require_once($CFG->dirroot . '/repository/lib.php');
+        $type = \repository::get_type_by_typename('largefile');
+        return $type && $type->get_visible();
     }
 }
