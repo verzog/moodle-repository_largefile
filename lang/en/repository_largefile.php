@@ -338,6 +338,12 @@ $string['uploadremovefailed'] = 'The upload could not be removed; it will be cle
 $string['uploadsinprogress'] = 'Uploads in progress';
 $string['uploadsize'] = 'Size';
 $string['uploadsremoved'] = 'Removed {$a} upload(s).';
+$string['uploadtab'] = 'Upload a large file';
+$string['uploadtab_desc'] = 'Start a chunked upload of a large file without opening a course activity\'s file picker first. When '
+    . 'the upload finishes it appears in Transfers → Completed uploads, ready to Send to… a destination or Restore.';
+$string['uploadtabgotransfers'] = 'Go to Transfers';
+$string['uploadtabstart'] = 'Start upload';
+$string['uploadtabsuccess'] = 'Upload complete.';
 $string['url'] = 'File URL';
 $string['url_help'] = 'Paste a direct http(s) download link (for example a signed S3 link). The site fetches it on the '
     . 'server, so it is not limited by the browser upload size. The site upload limit still applies.';

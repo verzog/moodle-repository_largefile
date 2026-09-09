@@ -408,6 +408,17 @@ class manage_page {
                 get_string('transfers', 'repository_largefile')
             );
         }
+        // The upload tab hosts the same chunked uploader the file picker uses, so it
+        // is only reachable by a user who could also reach the picker: they hold the
+        // view capability, and the picker itself is an enabled destination site-wide
+        // (with picker disabled the uploader stages nothing anyway).
+        if (has_capability('repository/largefile:view', $context) && import_policy::picker_enabled()) {
+            $tabs[] = new \tabobject(
+                'upload',
+                new \moodle_url('/repository/largefile/upload.php'),
+                get_string('uploadtab', 'repository_largefile')
+            );
+        }
         return $OUTPUT->tabtree($tabs, $active);
     }
 }

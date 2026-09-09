@@ -1115,3 +1115,43 @@ const registerEventListeners = () => {
 export const init = () => {
     registerEventListeners();
 };
+
+/**
+ * Initialise the standalone Upload page (Transfers → Upload tab): bind the
+ * given trigger button so clicking it opens the same dialogue the file picker
+ * opens on its upload event. The completion callback surfaces a Moodle
+ * notification pointing back at the Transfers page rather than closing the
+ * page, so an admin can start another upload without navigating away.
+ *
+ * @param {object} data The bootstrap payload from the page:
+ *        {contextId, transfersUrl, trigger}.
+ * @return {void}
+ */
+export const initStandalone = (data) => {
+    const trigger = document.querySelector(data.trigger);
+    if (!trigger) {
+        return;
+    }
+    trigger.addEventListener('click', () => {
+        openUploadModal({
+            repoId: 0,
+            contextId: data.contextId,
+            callback: async() => {
+                const [ok, go] = await Promise.all([
+                    getString('uploadtabsuccess', 'repository_largefile'),
+                    getString('uploadtabgotransfers', 'repository_largefile'),
+                ]);
+                const link = document.createElement('a');
+                link.href = data.transfersUrl;
+                link.textContent = go;
+                const span = document.createElement('span');
+                span.textContent = ok + ' ';
+                span.appendChild(link);
+                Notification.addNotification({
+                    type: 'success',
+                    message: span.outerHTML,
+                });
+            },
+        });
+    });
+};
