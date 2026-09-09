@@ -83,6 +83,17 @@ class cleanup_chunks extends \core\task\scheduled_task {
      */
     private function purge_orphaned_rows(): void {
         global $DB;
+        // Guard against a temporarily unavailable chunk area — a disconnected
+        // network-mounted dataroot, or an unmounted filesystem — where
+        // file_exists() would return false for every payload and this sweep
+        // would then permanently delete every tracking row on that run. When
+        // the base folder is not a directory the whole sweep is skipped, so a
+        // real dataroot outage never turns into permanent data loss; if the
+        // folder is genuinely absent because no uploads have ever landed there
+        // is nothing to sweep anyway.
+        if (!is_dir(chunk_store::get_base_folder())) {
+            return;
+        }
         // Only STARTED and COMPLETED rows are expected to have a file on disk;
         // an UNUSED row is a token issued but not yet written, so a missing
         // file there is normal, not orphan state.
