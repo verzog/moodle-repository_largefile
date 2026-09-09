@@ -189,10 +189,14 @@ class cleanup_chunks extends \core\task\scheduled_task {
             'lastmodified < :time AND state = :state',
             ['time' => time() - $maxage, 'state' => $state]
         );
-        // Delete each via chunk_store so the file is removed before its row, and a
-        // row whose file could not be removed is kept for the next run to retry.
+        // Delete each via chunk_store's state-guarded, locked path: the same lock a
+        // Send-to/Restore admin action takes, so cleanup cannot pull the file out
+        // from under a routing operation whose completed source it would otherwise
+        // race on. The state guard also means a row that has since moved on (an
+        // upload that finished after the id was listed) is left alone. A row whose
+        // file could not be unlinked is kept for the next run to retry.
         foreach ($ids as $id) {
-            chunk_store::delete((string) $id);
+            chunk_store::delete_in_state((string) $id, $state);
         }
     }
 }

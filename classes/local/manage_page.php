@@ -305,9 +305,18 @@ class manage_page {
             );
             $actions = [$send];
             // Restore a course backup directly on a chosen course. Only shown for
-            // .mbz files (the only kind the Moodle restore wizard reads), so a
-            // SCORM or video row is not offered a restore link that would fail.
-            if (import_policy::detect_type((string) $row->filename) === import_policy::TYPE_BACKUP) {
+            // .mbz files (the only kind the Moodle restore wizard reads) *and*
+            // only when the course backup area destination is enabled site-wide —
+            // the handler routes the file there, and store_imported_file() would
+            // reject any other destination for this action, so a link that could
+            // not succeed is not offered in the first place.
+            $isbackup = import_policy::detect_type((string) $row->filename) === import_policy::TYPE_BACKUP;
+            $coursebackupon = in_array(
+                import_policy::DEST_COURSEBACKUP,
+                import_policy::destinations_for(import_policy::TYPE_BACKUP),
+                true
+            );
+            if ($isbackup && $coursebackupon) {
                 $actions[] = \html_writer::link(
                     new \moodle_url($baseurl, [
                         'action' => 'restorecompleted',

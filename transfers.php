@@ -133,6 +133,13 @@ if ($action === 'sendcompleted') {
     $type = import_policy::detect_type((string) $record->filename);
     $destinations = [];
     foreach (import_policy::destinations_for($type) as $dest) {
+        // The file is already staged in the large-file picker (that is what the
+        // chunk store *is*), so offering "picker" as a Send destination would
+        // just move the bytes to a new token — an operation with no visible
+        // effect, since the user must still reopen the same picker to use it.
+        if ($dest === import_policy::DEST_PICKER) {
+            continue;
+        }
         $destinations[$dest] = import_policy::destination_label($dest);
     }
     if (!$destinations) {
@@ -177,19 +184,37 @@ if ($action === 'sendcompleted') {
                 if (!$srcpath || !file_exists($srcpath)) {
                     $notice = get_string('uploadalreadyfinished', 'repository_largefile');
                 } else {
+                    // Hashing and copying a multi-gigabyte file into the file pool
+                    // is synchronous and can outlast a 30- or 60-second web
+                    // request. Raise the PHP time limit and close the session so
+                    // the user's session lock is not held for the full copy —
+                    // matching import.php's foreground URL fetch and share.php's
+                    // stream-download path.
+                    \core\session\manager::write_close();
+                    \core_php_time_limit::raise();
                     try {
+                        // Authorize the write as the acting operator, not the
+                        // upload's original owner: a manager who holds
+                        // moodle/restore:uploadfile on the chosen course must be
+                        // able to route someone else's completed upload there,
+                        // and the file naturally belongs to the operator whose
+                        // destination it lands in (private backup / private
+                        // files under $USER, or the course they picked).
                         $stored = import_policy::store_imported_file(
-                            (int) $fresh->userid,
+                            (int) $USER->id,
                             $srcpath,
                             (string) $fresh->filename,
                             $destination,
                             (int) $fresh->contextid,
                             $courseid
                         );
-                        // The source file is consumed by store_imported_file(); drop
-                        // the row here rather than leaving it to the cleanup task,
-                        // which would then try to unlink an already-gone path.
-                        $DB->delete_records(chunk_store::TABLE, ['id' => $fresh->id]);
+                        // Remove the row via chunk_store::delete(): it re-attempts
+                        // the source unlink store_imported_file()'s @unlink might
+                        // have silently failed, and keeps the row for the cleanup
+                        // task to retry if the file still cannot be removed —
+                        // never dropping the only tracking record while bytes
+                        // remain on disk.
+                        chunk_store::delete((string) $fresh->id);
                         $notice = get_string(
                             'sendcompletedsuccess',
                             'repository_largefile',
@@ -284,16 +309,26 @@ if ($action === 'restorecompleted') {
                     $redirecturl = $baseurl;
                     $notice = get_string('uploadalreadyfinished', 'repository_largefile');
                 } else {
+                    // See the sendcompleted handler above: hashing and copying a
+                    // multi-gigabyte file into the file pool must not run under
+                    // the default web-request time limit or hold the session lock.
+                    \core\session\manager::write_close();
+                    \core_php_time_limit::raise();
                     try {
+                        // Authorize the write as the acting operator (see the
+                        // sendcompleted handler for the rationale); the caps
+                        // above already re-checked the operator's rights on
+                        // this course, and store_imported_file() then re-checks
+                        // them against the same user.
                         $stored = import_policy::store_imported_file(
-                            (int) $fresh->userid,
+                            (int) $USER->id,
                             $srcpath,
                             (string) $fresh->filename,
                             import_policy::DEST_COURSEBACKUP,
                             (int) $fresh->contextid,
                             $courseid
                         );
-                        $DB->delete_records(chunk_store::TABLE, ['id' => $fresh->id]);
+                        chunk_store::delete((string) $fresh->id);
                         // Drive the restore wizard directly on the file just placed
                         // in the course backup area. pathnamehash+contenthash pin
                         // the file so restore.php has no more decisions to prompt
