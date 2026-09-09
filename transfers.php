@@ -24,9 +24,13 @@
 
 require(__DIR__ . '/../../config.php');
 
+use repository_largefile\chunk_store;
+use repository_largefile\local\import_policy;
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\transfer_manager;
 use repository_largefile\local\manage_page;
+use repository_largefile\form\completed_restore_form;
+use repository_largefile\form\completed_send_form;
 use repository_largefile\form\transfer_form;
 
 // Repository plugins are not part of the admin settings tree, so this page stands
@@ -111,6 +115,265 @@ if ($action === 'removeallstalled') {
         new moodle_url($baseurl, ['action' => 'removeallstalled', 'confirm' => 1, 'sesskey' => sesskey()]),
         $baseurl
     );
+    echo $OUTPUT->footer();
+    exit;
+}
+// Route a completed-but-unselected upload straight to a real destination (private
+// backup area / course backup area / private files) via a small form, so a large
+// backup does not have to be re-selected through the (slow) large-file picker.
+// The file's kind narrows the destinations offered; sending is gated by the same
+// policy the ordinary import path applies, and the source is consumed on success.
+if ($action === 'sendcompleted') {
+    require_sesskey();
+    $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
+    if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
+        redirect($baseurl, get_string('uploadalreadyfinished', 'repository_largefile'));
+    }
+    $type = import_policy::detect_type((string) $record->filename);
+    $destinations = [];
+    foreach (import_policy::destinations_for($type) as $dest) {
+        // The file is already staged in the large-file picker (that is what the
+        // chunk store *is*), so offering "picker" as a Send destination would
+        // just move the bytes to a new token — an operation with no visible
+        // effect, since the user must still reopen the same picker to use it.
+        if ($dest === import_policy::DEST_PICKER) {
+            continue;
+        }
+        $destinations[$dest] = import_policy::destination_label($dest);
+    }
+    if (!$destinations) {
+        redirect(
+            $baseurl,
+            get_string('errordestnotallowed', 'repository_largefile', import_policy::type_label($type))
+        );
+    }
+    $form = new completed_send_form(
+        new moodle_url($baseurl, ['action' => 'sendcompleted', 'uploadid' => $uploadid]),
+        ['uploadid' => $uploadid, 'filename' => $record->filename, 'destinations' => $destinations]
+    );
+    if ($form->is_cancelled()) {
+        redirect($baseurl);
+    }
+    if ($data = $form->get_data()) {
+        $destination = (string) ($data->destination ?? array_key_first($destinations));
+        $courseid = (int) ($data->courseid ?? 0);
+        // Take the per-token lock the background writer and delete_in_state() also
+        // use, so a concurrent Remove or a repeat Send cannot race on the source
+        // file (one of them would otherwise read a file the other has just moved).
+        // The row is re-checked inside the lock, and the source path is dropped
+        // only after store_imported_file() has consumed the bytes.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            redirect(
+                $baseurl,
+                get_string('uploadremovefailed', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        $notice = null;
+        $noticetype = null;
+        try {
+            $fresh = chunk_store::get_record($record->id);
+            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
+                $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+            } else {
+                $srcpath = chunk_store::get_path_for_id($fresh->id);
+                if (!$srcpath || !file_exists($srcpath)) {
+                    $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                } else {
+                    // Hashing and copying a multi-gigabyte file into the file pool
+                    // is synchronous and can outlast a 30- or 60-second web
+                    // request. Raise the PHP time limit and close the session so
+                    // the user's session lock is not held for the full copy —
+                    // matching import.php's foreground URL fetch and share.php's
+                    // stream-download path.
+                    \core\session\manager::write_close();
+                    \core_php_time_limit::raise();
+                    try {
+                        // Authorize the write as the acting operator, not the
+                        // upload's original owner: a manager who holds
+                        // moodle/restore:uploadfile on the chosen course must be
+                        // able to route someone else's completed upload there,
+                        // and the file naturally belongs to the operator whose
+                        // destination it lands in (private backup / private
+                        // files under $USER, or the course they picked).
+                        $stored = import_policy::store_imported_file(
+                            (int) $USER->id,
+                            $srcpath,
+                            (string) $fresh->filename,
+                            $destination,
+                            (int) $fresh->contextid,
+                            $courseid
+                        );
+                        // Remove the row via chunk_store::delete(): it re-attempts
+                        // the source unlink store_imported_file()'s @unlink might
+                        // have silently failed, and keeps the row for the cleanup
+                        // task to retry if the file still cannot be removed —
+                        // never dropping the only tracking record while bytes
+                        // remain on disk.
+                        chunk_store::delete((string) $fresh->id);
+                        $notice = get_string(
+                            'sendcompletedsuccess',
+                            'repository_largefile',
+                            (object) [
+                                'file' => $stored,
+                                'destination' => import_policy::destination_label($destination),
+                            ]
+                        );
+                    } catch (\moodle_exception $e) {
+                        $notice = $e->getMessage();
+                        $noticetype = \core\output\notification::NOTIFY_ERROR;
+                    }
+                }
+            }
+        } finally {
+            $lock->release();
+        }
+        redirect($baseurl, $notice, null, $noticetype);
+    }
+    echo $OUTPUT->header();
+    echo manage_page::tabs('transfers');
+    echo $OUTPUT->heading(get_string('sendcompletedheading', 'repository_largefile'));
+    echo html_writer::tag('p', get_string('sendcompleted_desc', 'repository_largefile'), ['class' => 'text-muted']);
+    $form->display();
+    echo $OUTPUT->footer();
+    exit;
+}
+// Restore a completed .mbz upload directly on a chosen course: copy the file into
+// that course's backup area, then redirect straight to Moodle's restore wizard on
+// it. Saves the user opening the file picker on the restore screen and re-picking
+// the just-uploaded backup, which can take a long time to render for large stores.
+if ($action === 'restorecompleted') {
+    require_sesskey();
+    $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
+    if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
+        redirect($baseurl, get_string('uploadalreadyfinished', 'repository_largefile'));
+    }
+    if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
+        redirect($baseurl, get_string('errorrestorenotbackup', 'repository_largefile'));
+    }
+    $form = new completed_restore_form(
+        new moodle_url($baseurl, ['action' => 'restorecompleted', 'uploadid' => $uploadid]),
+        ['uploadid' => $uploadid, 'filename' => $record->filename]
+    );
+    if ($form->is_cancelled()) {
+        redirect($baseurl);
+    }
+    if ($data = $form->get_data()) {
+        $courseid = (int) ($data->courseid ?? 0);
+        $coursecontext = \context_course::instance($courseid, IGNORE_MISSING);
+        // Both caps re-checked here so a background course change or a spoofed
+        // form can never route a file into a course whose restore the user cannot
+        // then start. The course picker already limited the options to these.
+        if (
+            !$coursecontext
+                || !has_capability('moodle/restore:uploadfile', $coursecontext)
+                || !has_capability('moodle/restore:restorecourse', $coursecontext)
+        ) {
+            redirect(
+                $baseurl,
+                get_string('errornocoursebackupcap', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        // Take the per-token lock while the file is copied out of the chunk area,
+        // for the same reason as sendcompleted: a concurrent Remove or Send would
+        // otherwise race on the source path. The redirect that drives the restore
+        // wizard is deferred until after the lock is released.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
+            redirect(
+                $baseurl,
+                get_string('uploadremovefailed', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        $redirecturl = null;
+        $notice = null;
+        $noticetype = null;
+        try {
+            $fresh = chunk_store::get_record($record->id);
+            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
+                $redirecturl = $baseurl;
+                $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+            } else {
+                $srcpath = chunk_store::get_path_for_id($fresh->id);
+                if (!$srcpath || !file_exists($srcpath)) {
+                    $redirecturl = $baseurl;
+                    $notice = get_string('uploadalreadyfinished', 'repository_largefile');
+                } else {
+                    // See the sendcompleted handler above: hashing and copying a
+                    // multi-gigabyte file into the file pool must not run under
+                    // the default web-request time limit or hold the session lock.
+                    \core\session\manager::write_close();
+                    \core_php_time_limit::raise();
+                    try {
+                        // Authorize the write as the acting operator (see the
+                        // sendcompleted handler for the rationale); the caps
+                        // above already re-checked the operator's rights on
+                        // this course, and store_imported_file() then re-checks
+                        // them against the same user.
+                        $stored = import_policy::store_imported_file(
+                            (int) $USER->id,
+                            $srcpath,
+                            (string) $fresh->filename,
+                            import_policy::DEST_COURSEBACKUP,
+                            (int) $fresh->contextid,
+                            $courseid
+                        );
+                        chunk_store::delete((string) $fresh->id);
+                        // Drive the restore wizard directly on the file just placed
+                        // in the course backup area. pathnamehash+contenthash pin
+                        // the file so restore.php has no more decisions to prompt
+                        // for; the user lands on the first restore step.
+                        $fs = get_file_storage();
+                        $file = $fs->get_file($coursecontext->id, 'backup', 'course', 0, '/', $stored);
+                        if ($file) {
+                            $redirecturl = new moodle_url('/backup/restore.php', [
+                                'contextid' => $coursecontext->id,
+                                'pathnamehash' => $file->get_pathnamehash(),
+                                'contenthash' => $file->get_contenthash(),
+                            ]);
+                        } else {
+                            $redirecturl = new moodle_url(
+                                '/backup/restorefile.php',
+                                ['contextid' => $coursecontext->id]
+                            );
+                            $notice = get_string(
+                                'sendcompletedsuccess',
+                                'repository_largefile',
+                                (object) [
+                                    'file' => $stored,
+                                    'destination' => import_policy::destination_label(
+                                        import_policy::DEST_COURSEBACKUP
+                                    ),
+                                ]
+                            );
+                        }
+                    } catch (\moodle_exception $e) {
+                        $redirecturl = $baseurl;
+                        $notice = $e->getMessage();
+                        $noticetype = \core\output\notification::NOTIFY_ERROR;
+                    }
+                }
+            }
+        } finally {
+            $lock->release();
+        }
+        redirect($redirecturl, $notice, null, $noticetype);
+    }
+    echo $OUTPUT->header();
+    echo manage_page::tabs('transfers');
+    echo $OUTPUT->heading(get_string('restorecompletedheading', 'repository_largefile'));
+    echo html_writer::tag('p', get_string('restorecompleted_desc', 'repository_largefile'), ['class' => 'text-muted']);
+    $form->display();
     echo $OUTPUT->footer();
     exit;
 }

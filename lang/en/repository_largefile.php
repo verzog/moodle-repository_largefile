@@ -72,6 +72,8 @@ $string['errorpeerinsecureurl'] = 'The peer\'s site URL must use https. Signed d
 $string['errorpeernourl'] = 'This peer has no Site URL, so its connection cannot be checked. Edit the peer and add its '
     . 'address.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
+$string['errorrestorenotbackup'] = 'Only a Moodle course backup (.mbz) can be restored directly. Use Send to… to route the '
+    . 'file into a real destination first.';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
 $string['errorsharedecrypt'] = 'The shared backup could not be decrypted. The pairing secret may be wrong, or the file '
@@ -197,12 +199,26 @@ $string['privacy:metadata:repository_largefile_transfers:type'] = 'The kind of t
 $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user the transfer runs for.';
 $string['removeallcompleted'] = 'Remove all completed uploads';
 $string['removeallstalled'] = 'Remove all stalled uploads';
+$string['restorecompleted'] = 'Restore…';
+$string['restorecompleted_desc'] = 'Restore this completed upload directly on a course. The backup file is copied into that '
+    . 'course\'s backup area and Moodle\'s restore wizard opens on it — no need to reopen the large file picker.';
+$string['restorecompletedbutton'] = 'Copy to course and restore';
+$string['restorecompletedcourse'] = 'Target course';
+$string['restorecompletedcourse_help'] = 'The course to restore the backup into. Only courses you may both upload a backup '
+    . 'into and start a restore in are listed.';
+$string['restorecompletedheading'] = 'Restore a completed upload';
 $string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
     . 'file to carry on where you left off, or choose a different file to start over.';
 $string['resumeready'] = 'Ready to resume "{$a}" — the upload will continue from where it stopped.';
 $string['revokeshare'] = 'Revoke';
 $string['revokeshareconfirm'] = 'Revoke this share? The peer will no longer be able to download it.';
 $string['selectuploaded'] = 'Select uploaded file';
+$string['sendcompleted'] = 'Send to…';
+$string['sendcompleted_desc'] = 'Route this completed upload straight to a real destination (private backup area, a '
+    . 'course\'s backup area, or private files) — no need to reopen the large file picker to select it.';
+$string['sendcompletedbutton'] = 'Send';
+$string['sendcompletedheading'] = 'Send a completed upload';
+$string['sendcompletedsuccess'] = 'Sent "{$a->file}" to {$a->destination}.';
 $string['setting:accept'] = 'Accept';
 $string['setting:chunksize'] = 'Chunk size (MB)';
 $string['setting:chunksize_help'] = 'Size of each chunk sent to the server when uploading a large file, in megabytes. '
