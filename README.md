@@ -250,6 +250,47 @@ scheduled transfer, which runs on the server with no page open.
 | Keep unfinished uploads for | 1 hour | Retention for a partially uploaded file. |
 | Keep completed uploads for | 1 day | Retention for a completed upload that was never selected. |
 
+## Troubleshooting
+
+### File picker error: `SyntaxError: Unexpected token '<' … is not valid JSON`
+
+This appears in the browser console (with a stack trace through Moodle's
+`repository/filepicker.js` → `Y.JSON.parse`) when you select a staged file and
+click **Select this file**, or during a transfer. The picker's insert step calls
+`repository/repository_ajax.php` and expects a JSON reply, but the web server or
+a proxy in front of it returned an **HTML** page instead, so the JSON parse
+fails.
+
+This is almost always a server/proxy configuration issue, not a plugin fault.
+Selecting a staged file makes Moodle copy the whole file into the draft area
+synchronously, inside that one request — so the larger the file (and the slower
+the disk), the longer that request runs.
+
+Tell Moodle's page apart from a proxy's: a Moodle page starts with
+`<!DOCTYPE html>`, whereas a bare `<html>` followed by `<head><title>NNN …` is
+an **nginx** (or reverse-proxy) error page that never reached PHP.
+
+**Find the real cause.** Reproduce it, then read the actual response:
+
+- Browser: **DevTools → Network → `repository_ajax.php`** — note the **Status**
+  and the first lines of the **Response** tab; or
+- Server: the per-vhost log, e.g. `sudo tail -n 30 /var/log/nginx/<vhost>-error.log`
+  (a 504 shows as `upstream timed out … while reading response header`).
+
+**Then apply the matching fix:**
+
+| Status / response | Cause | Fix |
+|---|---|---|
+| **504** (or `upstream timed out`) | Copying the staged file into the file area took longer than the proxy/PHP timeout. | Raise `fastcgi_read_timeout` (or `proxy_read_timeout`) and `send_timeout` in nginx, `request_terminate_timeout` in the PHP-FPM pool, and `max_execution_time` in `php.ini`. Set them comfortably above the time it takes to copy your largest file. |
+| **413 Request Entity Too Large** | A request body exceeded the proxy limit (nginx defaults to 1 MB). | Raise `client_max_body_size` in nginx, or lower the **Chunk size** setting so each chunk stays under the limit. |
+| **502 Bad Gateway** | PHP-FPM died mid-request, often out of memory on a large copy. | Raise PHP `memory_limit` and check the PHP-FPM error log. |
+| **500**, or a **200** whose body is HTML beginning with `<div class="… debuggingmessage">` | A PHP error or debugging output leaked into the JSON reply, which breaks every insert regardless of file size. | On a production site set **Site administration → Development → Debug messages** to *NONE* and turn off *Display debug messages*; then fix the underlying warning shown in the log. |
+
+The insert copy is inherent to Moodle's file-picker contract (`get_file()` hands
+the file to core, which copies it into the file pool in the same request), so the
+plugin cannot make it asynchronous — sizing the timeouts above is the reliable
+fix for large files.
+
 ## Developing / validating
 
 CI (`.github/workflows/moodle-ci.yml`) runs `moodle-plugin-ci` against a real
