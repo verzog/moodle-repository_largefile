@@ -56,8 +56,9 @@ class backup_source {
     /** @var string Source kind: a stored file already held in Moodle. */
     public const TYPE_STORED = 'stored';
 
-    /** @var int Most course-backup files to consider when building the menu. */
-    private const COURSE_BACKUP_SCAN_LIMIT = 500;
+    /** @var int Most course-backup rows to examine when building the menu, so a site
+     * with very many course backups never walks the whole files table. */
+    private const COURSE_BACKUP_SCAN_CAP = 5000;
 
     /** @var int Most selectable sources to show in the menu. */
     private const MENU_LIMIT = 200;
@@ -229,8 +230,10 @@ class backup_source {
     }
 
     /**
-     * Course-backup-area files the user may download, as menu options. The scan is
-     * bounded and each candidate is capability-checked in its own course context.
+     * Course-backup-area files the user may download, as menu options. Rows are
+     * capability-checked in newest-first order and collected until the menu is full,
+     * so an accessible backup is never hidden behind a pre-limit of inaccessible
+     * newer ones; the scan is still bounded so it never walks the whole files table.
      *
      * @param int $userid The user creating the share.
      * @return array Map of "stored:fileid" => label.
@@ -244,26 +247,29 @@ class backup_source {
                    AND f.filearea = :filearea
                    AND f.filename <> '.'
               ORDER BY f.timemodified DESC, f.id DESC";
-        $rows = $DB->get_records_sql(
-            $sql,
-            [
-                'courselevel' => CONTEXT_COURSE,
-                'component' => 'backup',
-                'filearea' => 'course',
-            ],
-            0,
-            self::COURSE_BACKUP_SCAN_LIMIT
-        );
+        $rs = $DB->get_recordset_sql($sql, [
+            'courselevel' => CONTEXT_COURSE,
+            'component' => 'backup',
+            'filearea' => 'course',
+        ]);
         $origin = get_string('sourcecoursebackup', 'repository_largefile');
         $options = [];
-        foreach ($rows as $row) {
+        $examined = 0;
+        foreach ($rs as $row) {
+            if (++$examined > self::COURSE_BACKUP_SCAN_CAP) {
+                break;
+            }
             $context = \context::instance_by_id((int) $row->contextid, IGNORE_MISSING);
             if (!$context || !has_capability('moodle/backup:downloadfile', $context, $userid)) {
                 continue;
             }
             $value = self::TYPE_STORED . ':' . $row->id;
             $options[$value] = self::label((string) $row->filename, (int) $row->filesize, $origin);
+            if (count($options) >= self::MENU_LIMIT) {
+                break;
+            }
         }
+        $rs->close();
         return $options;
     }
 

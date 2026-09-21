@@ -102,8 +102,14 @@ class process_transfers extends \core\task\scheduled_task {
      */
     public function execute(): void {
         // Return any transfer left running by an interrupted earlier run to the
-        // queue before picking up new work.
-        transfer_manager::reclaim_stale(time() - self::lease_seconds());
+        // queue before picking up new work. A publish failed here for good (out of
+        // attempts) never reaches transfer_runner::run(), so notify its owner from
+        // here rather than leave the promised failure notification unsent.
+        foreach (transfer_manager::reclaim_stale(time() - self::lease_seconds()) as $stale) {
+            if ($stale->type === transfer_manager::TYPE_PUBLISH) {
+                transfer_runner::notify_publish_failure($stale);
+            }
+        }
         $due = transfer_manager::get_due(time(), self::BATCH);
         foreach ($due as $transfer) {
             transfer_runner::run($transfer);

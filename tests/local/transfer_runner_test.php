@@ -215,8 +215,9 @@ final class transfer_runner_test extends \advanced_testcase {
         $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status);
         $this->assertStringContainsString('token=', (string) $transfer->result);
         $this->assertEquals(1, $DB->count_records('repository_largefile_shares'));
-        // The staged upload existed only to be published, so it is now gone.
-        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+        // The staged upload is left in place (an ordinary completed upload the owner
+        // may reuse); it is not consumed by publishing.
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
         // The owner was notified.
         $messages = $sink->get_messages();
         $this->assertCount(1, $messages);

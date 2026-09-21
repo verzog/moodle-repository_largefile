@@ -18,8 +18,10 @@ All notable changes to `repository_largefile` are documented here.
   enqueues a background publish (the *Create in the background* checkbox is
   gone) and returns immediately. The queued job reads the chosen source
   directly — the staged file on disk, or the stored backup — encrypts it, and
-  records the share; a fresh upload's staged file is then removed, while a
-  backup already in Moodle is left untouched. When the job finishes the
+  records the share. The source is left in place: a staged upload is an ordinary
+  completed upload the owner may reuse, send or restore, and a backup already in
+  Moodle is untouched; the cleanup task retires a staged upload on its normal
+  retention, kept until every queued publish of it has run. When the job finishes the
   publisher gets a Moodle notification (a new `sharepublished` message
   provider): the share link on success, or the reason on failure — so they need
   not keep the page open.

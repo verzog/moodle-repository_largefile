@@ -79,6 +79,23 @@ class transfer_runner {
     }
 
     /**
+     * Notify a publisher whose share transfer was failed outside {@see self::run()}
+     * — e.g. by {@see transfer_manager::reclaim_stale()} after repeated interruptions
+     * — so the promised failure notification still reaches them.
+     *
+     * @param \stdClass $transfer The failed publish transfer row (with its error set).
+     * @return void
+     */
+    public static function notify_publish_failure(\stdClass $transfer): void {
+        self::notify_publish(
+            (int) $transfer->userid,
+            (string) ($transfer->filename ?? ''),
+            null,
+            (string) ($transfer->error ?? '')
+        );
+    }
+
+    /**
      * Notify the publisher that a queued share has finished — with its link on
      * success, or the error on failure. A messaging failure is swallowed: the
      * outcome is already recorded on the transfer row, so it must not fail the job.
@@ -290,9 +307,11 @@ class transfer_runner {
                 $onprogress
             );
             \repository_largefile\event\share_created::for_share($share)->trigger();
-            // The staged upload has been encrypted and stored; it exists only to be
-            // published, so remove it (the owner does not also see it in the picker).
-            \repository_largefile\chunk_store::delete($token);
+            // The staged upload is left in place, not deleted here: it is an ordinary
+            // completed upload that the owner may also publish again, send or restore,
+            // so consuming it once must not pull it out from under those. The cleanup
+            // task retires it on its normal completed-upload retention, and the
+            // pending-publish guard keeps it until every queued publish of it has run.
             return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
         }
 

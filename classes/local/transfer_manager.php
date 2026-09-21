@@ -252,22 +252,30 @@ class transfer_manager {
      * row is rescheduled to be retried, or failed once it has used up its attempts.
      *
      * @param int $before Reclaim running rows whose timestarted is before this.
-     * @return void
+     * @return array The transfer rows this call terminally failed (each with its
+     *               error set), so the caller can notify their owners — a transfer
+     *               failed here never runs through {@see transfer_runner::run()},
+     *               which is where the per-run failure notification lives.
      */
-    public static function reclaim_stale(int $before): void {
+    public static function reclaim_stale(int $before): array {
         global $DB;
         $rows = $DB->get_records_select(
             self::TABLE,
             "status = :running AND timestarted IS NOT NULL AND timestarted < :before",
             ['running' => self::STATUS_RUNNING, 'before' => $before]
         );
+        $failed = [];
         foreach ($rows as $row) {
             if ((int) $row->attempts >= self::MAX_ATTEMPTS) {
-                self::mark_failed((int) $row->id, get_string('errortransferstalled', 'repository_largefile'));
+                $error = get_string('errortransferstalled', 'repository_largefile');
+                self::mark_failed((int) $row->id, $error);
+                $row->error = $error;
+                $failed[] = $row;
             } else {
                 $DB->set_field(self::TABLE, 'status', self::STATUS_SCHEDULED, ['id' => $row->id]);
             }
         }
+        return $failed;
     }
 
     /**
