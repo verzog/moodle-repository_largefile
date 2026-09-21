@@ -393,6 +393,35 @@ class transfer_manager {
     }
 
     /**
+     * Staged-upload tokens referenced by a publish transfer that has not finished.
+     *
+     * The reference-based create-share form queues a publish that names a staged
+     * upload by token rather than copying it, so the cleanup task must not sweep that
+     * staged file while a scheduled or running share still needs it.
+     *
+     * @return array List of chunk_store token ids (strings).
+     */
+    public static function active_publish_tokens(): array {
+        global $DB;
+        [$insql, $params] = $DB->get_in_or_equal(
+            [self::STATUS_SCHEDULED, self::STATUS_RUNNING],
+            SQL_PARAMS_NAMED
+        );
+        $params['type'] = self::TYPE_PUBLISH;
+        $rows = $DB->get_records_select(self::TABLE, "type = :type AND status $insql", $params, '', 'id, payload');
+        $tokens = [];
+        foreach ($rows as $row) {
+            $payload = json_decode((string) $row->payload, true);
+            if (is_array($payload)
+                    && ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN
+                    && !empty($payload['token'])) {
+                $tokens[] = (string) $payload['token'];
+            }
+        }
+        return $tokens;
+    }
+
+    /**
      * A user's own transfers, newest first.
      *
      * @param int $userid The owning user's id.

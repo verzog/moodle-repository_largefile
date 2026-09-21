@@ -67,8 +67,72 @@ class transfer_runner {
             }
             transfer_manager::mark_completed((int) $transfer->id, $result);
             \repository_largefile\event\transfer_completed::for_transfer($transfer, $result)->trigger();
+            if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
+                self::notify_publish((int) $transfer->userid, (string) $transfer->filename, $result, null);
+            }
         } catch (\Throwable $e) {
             transfer_manager::mark_failed((int) $transfer->id, $e->getMessage());
+            if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
+                self::notify_publish((int) $transfer->userid, (string) $transfer->filename, null, $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Notify the publisher that a queued share has finished — with its link on
+     * success, or the error on failure. A messaging failure is swallowed: the
+     * outcome is already recorded on the transfer row, so it must not fail the job.
+     *
+     * @param int $userid The publishing user.
+     * @param string $filename The published file name (may be empty).
+     * @param string|null $link The share link on success, or null on failure.
+     * @param string|null $error The failure message, or null on success.
+     * @return void
+     */
+    private static function notify_publish(int $userid, string $filename, ?string $link, ?string $error): void {
+        $user = \core_user::get_user($userid);
+        if (!$user) {
+            return;
+        }
+        $name = $filename !== '' ? $filename : '-';
+        $sharesurl = new \moodle_url('/repository/largefile/manage_shares.php');
+
+        $message = new \core\message\message();
+        $message->component = 'repository_largefile';
+        $message->name = 'sharepublished';
+        $message->userfrom = \core_user::get_noreply_user();
+        $message->userto = $user;
+        $message->notification = 1;
+        $message->courseid = SITEID;
+        $message->contexturl = $sharesurl->out(false);
+        $message->contexturlname = get_string('manageshares', 'repository_largefile');
+
+        if ($error === null) {
+            $message->subject = get_string('notifysharereadysubject', 'repository_largefile', $name);
+            $body = get_string('notifysharereadybody', 'repository_largefile', $name);
+            if ($link !== null && $link !== '') {
+                $body .= "\n\n" . $link;
+            }
+        } else {
+            $message->subject = get_string('notifysharefailedsubject', 'repository_largefile', $name);
+            $body = get_string(
+                'notifysharefailedbody',
+                'repository_largefile',
+                (object) ['filename' => $name, 'error' => $error]
+            );
+        }
+        $message->fullmessage = $body;
+        $message->fullmessageformat = FORMAT_PLAIN;
+        $message->fullmessagehtml = text_to_html($body);
+        $message->smallmessage = $message->subject;
+
+        try {
+            message_send($message);
+        } catch (\Throwable $e) {
+            debugging(
+                'repository_largefile: share notification could not be sent: ' . $e->getMessage(),
+                DEBUG_DEVELOPER
+            );
         }
     }
 
@@ -180,6 +244,80 @@ class transfer_runner {
         $expires = $duration > 0 ? time() + $duration : 0;
         $maxdownloads = (int) ($payload['maxdownloads'] ?? 0);
 
+        // Report progress on the transfer row, throttled to at most once a second so
+        // a long encryption stays observable without hammering the database. The final
+        // update (100%) is never throttled away: it tells the Transfers page that
+        // encryption is over and the encrypted file is now being stored — a step that
+        // reports no progress of its own and can take minutes.
+        $lastupdate = 0;
+        $onprogress = function (int $done, int $total) use ($transfer, &$lastupdate): void {
+            $now = time();
+            if ($total > 0 && ($now !== $lastupdate || $done >= $total)) {
+                $lastupdate = $now;
+                transfer_manager::set_progress((int) $transfer->id, (int) floor($done * 100 / $total));
+            }
+        };
+
+        $sourcetype = (string) ($payload['sourcetype'] ?? '');
+
+        if ($sourcetype === backup_source::TYPE_TOKEN) {
+            // A large file staged through this plugin's chunked uploader: encrypt
+            // straight from the staged file on disk, then discard it. Re-check the job
+            // owner still owns a completed staged file, so a payload that outlived its
+            // source (or names another user's) cannot be published.
+            $token = (string) ($payload['token'] ?? '');
+            $record = \repository_largefile\chunk_store::get_record($token);
+            if (!$record || (int) $record->userid !== (int) $transfer->userid
+                    || !\repository_largefile\chunk_store::is_complete($token)) {
+                throw new \moodle_exception('errorsharenofile', 'repository_largefile');
+            }
+            $path = \repository_largefile\chunk_store::get_path_for_id($token);
+            if ($path === null || !is_file($path)) {
+                throw new \moodle_exception('errorsharenofile', 'repository_largefile');
+            }
+            $filename = (string) $record->filename;
+            share_manager::delete_unstored($peerid, $filename, (int) $transfer->userid);
+            $share = share_manager::create(
+                $peerid,
+                $path,
+                $filename,
+                $expires,
+                $maxdownloads,
+                (int) $transfer->userid,
+                $onprogress
+            );
+            \repository_largefile\event\share_created::for_share($share)->trigger();
+            // The staged upload has been encrypted and stored; it exists only to be
+            // published, so remove it (the owner does not also see it in the picker).
+            \repository_largefile\chunk_store::delete($token);
+            return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
+        }
+
+        if ($sourcetype === backup_source::TYPE_STORED) {
+            // A backup already held in Moodle: encrypt straight from the stored file
+            // (no plaintext temp copy) and leave the original in place. Permission is
+            // re-derived from the file itself, so an unattended job cannot publish a
+            // file its owner may no longer access.
+            $file = backup_source::authorize_stored((int) ($payload['fileid'] ?? 0), (int) $transfer->userid);
+            if (!$file) {
+                throw new \moodle_exception('errorsharenofile', 'repository_largefile');
+            }
+            share_manager::delete_unstored($peerid, $file->get_filename(), (int) $transfer->userid);
+            $share = share_manager::create_from_storedfile(
+                $peerid,
+                $file,
+                $expires,
+                $maxdownloads,
+                (int) $transfer->userid,
+                $onprogress
+            );
+            \repository_largefile\event\share_created::for_share($share)->trigger();
+            return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
+        }
+
+        // Legacy path: an older create-share form staged the plaintext into a
+        // plugin-owned area keyed by this transfer's id. Still handled so a job queued
+        // before the reference-based form is honoured.
         $fs = get_file_storage();
         $files = $fs->get_area_files(
             \context_system::instance()->id,
@@ -193,27 +331,11 @@ class transfer_runner {
         if (!$file) {
             throw new \moodle_exception('errorsharenofile', 'repository_largefile');
         }
-
         // A previous attempt at this publication may have died between recording the
         // share and storing its encrypted file (the lease then returns the job here).
         // Such a share can never be downloaded, so remove it rather than leave a
         // duplicate, file-less entry beside the one this attempt creates.
         share_manager::delete_unstored($peerid, $file->get_filename(), (int) $transfer->userid);
-
-        // Encrypt straight from the staged stored file (no plaintext temp copy) and
-        // report progress on the transfer row, throttled to at most once a second so
-        // a long encryption stays observable without hammering the database. The
-        // final update (100%) is never throttled away: it tells the Transfers page
-        // that encryption is over and the encrypted file is now being stored — a
-        // step that reports no progress of its own and can take minutes.
-        $lastupdate = 0;
-        $onprogress = function (int $done, int $total) use ($transfer, &$lastupdate): void {
-            $now = time();
-            if ($total > 0 && ($now !== $lastupdate || $done >= $total)) {
-                $lastupdate = $now;
-                transfer_manager::set_progress((int) $transfer->id, (int) floor($done * 100 / $total));
-            }
-        };
         $share = share_manager::create_from_storedfile(
             $peerid,
             $file,
@@ -223,7 +345,6 @@ class transfer_runner {
             $onprogress
         );
         \repository_largefile\event\share_created::for_share($share)->trigger();
-
         // The plaintext source is no longer needed once it is encrypted and stored.
         transfer_manager::delete_publish_source((int) $transfer->id);
 

@@ -52,16 +52,31 @@ class share_form extends \moodleform {
         );
         $mform->addRule('peerid', get_string('required'), 'required', null, 'client');
 
-        // The file is uploaded through the picker (chunked upload is available in
-        // that picker for a backup bigger than the PHP limit).
+        // The file is chosen by reference — either a large file already staged
+        // through this plugin's uploader, or a backup already held in Moodle — so
+        // nothing large is copied in this request; the background job reads the
+        // chosen source directly. A file too big for the browser upload dialogue is
+        // uploaded first on the Upload tab, then appears here to select.
         $mform->addElement(
-            'filepicker',
-            'sharefile',
+            'autocomplete',
+            'sharesource',
             get_string('sharefile', 'repository_largefile'),
-            null,
-            ['maxbytes' => 0, 'accepted_types' => '*']
+            $this->_customdata['sources'] ?? [],
+            ['noselectionstring' => get_string('choosedots')]
         );
-        $mform->addRule('sharefile', get_string('required'), 'required', null, 'client');
+        $mform->addRule('sharesource', get_string('required'), 'required', null, 'client');
+        $mform->addHelpButton('sharesource', 'sharefile', 'repository_largefile');
+
+        $uploadlink = \html_writer::link(
+            new \moodle_url('/repository/largefile/upload.php'),
+            get_string('sharesourceuploadlink', 'repository_largefile')
+        );
+        $mform->addElement(
+            'static',
+            'sharesourcehint',
+            '',
+            get_string('sharesourcehint', 'repository_largefile', $uploadlink)
+        );
 
         $mform->addElement(
             'duration',
@@ -83,12 +98,6 @@ class share_form extends \moodleform {
         // by a network fault uses one up; a couple of retries must not need re-publishing.
         $mform->setDefault('maxdownloads', 3);
         $mform->addHelpButton('maxdownloads', 'sharemaxdownloads', 'repository_largefile');
-
-        // Encrypting a large backup in the foreground can exceed the web server's
-        // request timeout (a 504). Running it on the server avoids that.
-        $mform->addElement('advcheckbox', 'background', get_string('sharepublishbackground', 'repository_largefile'));
-        $mform->setDefault('background', 1);
-        $mform->addHelpButton('background', 'sharepublishbackground', 'repository_largefile');
 
         $this->add_action_buttons(true, get_string('createshare', 'repository_largefile'));
     }

@@ -52,6 +52,7 @@ class share_manager {
      * @param int $expires Unix expiry time, or 0 for never.
      * @param int $maxdownloads Maximum successful downloads, or 0 for unlimited.
      * @param int $userid The user creating the share.
+     * @param callable|null $onprogress Optional callback invoked as ($bytesdone, $bytestotal).
      * @return \stdClass The stored share row (including its token).
      * @throws \moodle_exception If the peer is unknown.
      */
@@ -61,16 +62,34 @@ class share_manager {
         string $filename,
         int $expires,
         int $maxdownloads,
-        int $userid
+        int $userid,
+        ?callable $onprogress = null
     ): \stdClass {
+        $filesize = (int) (@filesize($srcpath) ?: 0);
         return self::store_encrypted(
             $peerid,
             $filename,
-            (int) (@filesize($srcpath) ?: 0),
+            $filesize,
             $expires,
             $maxdownloads,
             $userid,
-            fn(string $dest, string $key) => crypto::encrypt_file($srcpath, $dest, $key)
+            function (string $dest, string $key) use ($srcpath, $filesize, $onprogress) {
+                // With a progress callback, stream from the path (as the stored-file
+                // publish does) so a long encryption of a large staged file reports
+                // progress; otherwise encrypt the file directly.
+                if ($onprogress === null) {
+                    return crypto::encrypt_file($srcpath, $dest, $key);
+                }
+                $in = fopen($srcpath, 'rb');
+                if ($in === false) {
+                    throw new \moodle_exception('errorshareencrypt', 'repository_largefile');
+                }
+                try {
+                    return crypto::encrypt_stream($in, $filesize, $dest, $key, $onprogress);
+                } finally {
+                    fclose($in);
+                }
+            }
         );
     }
 

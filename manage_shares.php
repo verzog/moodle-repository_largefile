@@ -28,9 +28,9 @@ require_once($CFG->libdir . '/adminlib.php');
 use repository_largefile\local\peer_manager;
 use repository_largefile\local\share_manager;
 use repository_largefile\local\transfer_manager;
+use repository_largefile\local\backup_source;
 use repository_largefile\local\manage_page;
 use repository_largefile\form\share_form;
-use repository_largefile\event\share_created;
 
 // Repository plugins are not part of the admin settings tree, so this management
 // page stands alone: it is reached from the plugin's configuration page and gated
@@ -73,66 +73,49 @@ if ($action === 'cancelpublish' && $id) {
 }
 
 $peers = peer_manager::menu();
-$newshare = null;
 
 if ($peers) {
-    $form = new share_form($baseurl->out(false), ['peers' => $peers]);
+    $form = new share_form($baseurl->out(false), [
+        'peers' => $peers,
+        'sources' => backup_source::menu_for_user((int) $USER->id),
+    ]);
     if ($data = $form->get_data()) {
-        // Pull the uploaded file out of the draft area into a temp path to encrypt.
-        $fs = get_file_storage();
-        $usercontext = context_user::instance($USER->id);
-        $files = $fs->get_area_files($usercontext->id, 'user', 'draft', $data->sharefile, 'id DESC', false);
-        $file = reset($files);
-        if ($file && !empty($data->background)) {
-            // Encrypt and publish on the server, immune to the web request timeout
-            // that a large backup would otherwise hit. The scheduled task encrypts
-            // it and the link appears on this page.
-            $transferid = transfer_manager::create(
-                transfer_manager::TYPE_PUBLISH,
-                (int) $USER->id,
-                [
-                    'peerid' => (int) $data->peerid,
-                    // Store the requested duration, not an absolute time: the runner
-                    // starts the expiry when the share is actually created.
-                    'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
-                    'maxdownloads' => max(0, (int) $data->maxdownloads),
-                    // Recorded so the running-progress readout can show throughput/ETA.
-                    'filesize' => (int) $file->get_filesize(),
-                ],
-                0,
-                $context->id,
-                $file->get_filename()
+        // Resolve the chosen source by reference and re-check the user is entitled to
+        // it — nothing large is copied here; the background job reads it directly and
+        // encrypts it, immune to the web request timeout a large backup would hit.
+        $source = backup_source::resolve((string) $data->sharesource, (int) $USER->id);
+        if ($source === null) {
+            redirect(
+                $baseurl,
+                get_string('errorsharenofile', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
             );
-            // Stage the upload into a plugin-owned area keyed by the transfer id, so
-            // it survives Moodle's draft-area cleanup until the job runs. Referencing
-            // the stored file copies only a file record — the (multi-gigabyte) bytes
-            // are shared, not duplicated.
-            $fs->create_file_from_storedfile([
-                'contextid' => $context->id,
-                'component' => 'repository_largefile',
-                'filearea' => transfer_manager::PENDING_FILEAREA,
-                'itemid' => $transferid,
-                'filepath' => '/',
-                'filename' => $file->get_filename(),
-            ], $file);
-            // Return to this page (the publisher holds the sharing capability, which
-            // the site-wide Transfers monitor does not require); the pending job and
-            // then its link appear below.
-            redirect($baseurl, get_string('sharequeued', 'repository_largefile'));
         }
-        if ($file) {
-            $temp = make_request_directory() . '/' . $file->get_filename();
-            $file->copy_content_to($temp);
-            $newshare = share_manager::create(
-                (int) $data->peerid,
-                $temp,
-                $file->get_filename(),
-                empty($data->expiry) ? 0 : time() + (int) $data->expiry,
-                max(0, (int) $data->maxdownloads),
-                (int) $USER->id
-            );
-            share_created::for_share($newshare)->trigger();
+        $payload = [
+            'peerid' => (int) $data->peerid,
+            // Store the requested duration, not an absolute time: the runner starts
+            // the expiry when the share is actually created.
+            'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
+            'maxdownloads' => max(0, (int) $data->maxdownloads),
+            // Recorded so the running-progress readout can show throughput/ETA.
+            'filesize' => (int) $source['filesize'],
+            'sourcetype' => $source['type'],
+        ];
+        if ($source['type'] === backup_source::TYPE_TOKEN) {
+            $payload['token'] = $source['token'];
+        } else {
+            $payload['fileid'] = (int) $source['fileid'];
         }
+        transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $USER->id,
+            $payload,
+            0,
+            $context->id,
+            (string) $source['filename']
+        );
+        redirect($baseurl, get_string('sharequeued', 'repository_largefile'));
     }
 }
 
@@ -140,13 +123,6 @@ echo $OUTPUT->header();
 echo manage_page::tabs('shares');
 echo $OUTPUT->heading(get_string('manageshares', 'repository_largefile'));
 echo html_writer::tag('p', get_string('manageshares_desc', 'repository_largefile'), ['class' => 'text-muted']);
-
-if ($newshare) {
-    $link = (new moodle_url('/repository/largefile/share.php', ['token' => $newshare->token]))->out(false);
-    echo $OUTPUT->notification(get_string('sharecreated', 'repository_largefile'), \core\output\notification::NOTIFY_SUCCESS);
-    echo html_writer::tag('p', get_string('sharelinkinfo', 'repository_largefile'));
-    echo html_writer::tag('pre', s($link), ['class' => 'p-2 bg-light border rounded']);
-}
 
 if (!$peers) {
     echo $OUTPUT->notification(get_string('nopeersforshare', 'repository_largefile'), \core\output\notification::NOTIFY_WARNING);

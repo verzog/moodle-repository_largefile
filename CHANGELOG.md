@@ -2,6 +2,36 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.8 — 2026-09-21
+
+- **Create a share by reference — no foreground copy.** The *Backup shares →
+  Create share* form previously used the file picker for *File to share*, which
+  copied the whole backup into a draft area at select time, in the web request.
+  For a multi-gigabyte backup that copy ran long enough to hit the web server's
+  timeout (a 504), so the picker's follow-up call returned an HTML error page
+  and the dialogue failed with `SyntaxError: Unexpected token '<'`. The form now
+  chooses the file **by reference** instead: a searchable selector lists the
+  user's own staged large-file uploads and the backups they already hold in
+  Moodle (their private backup area and private files, and course backup areas
+  they may download from). Nothing large is copied when the form is submitted.
+- **Always queued, and notified when ready.** Creating a share now always
+  enqueues a background publish (the *Create in the background* checkbox is
+  gone) and returns immediately. The queued job reads the chosen source
+  directly — the staged file on disk, or the stored backup — encrypts it, and
+  records the share; a fresh upload's staged file is then removed, while a
+  backup already in Moodle is left untouched. When the job finishes the
+  publisher gets a Moodle notification (a new `sharepublished` message
+  provider): the share link on success, or the reason on failure — so they need
+  not keep the page open.
+- **Security.** The chosen source is re-authorised from the file itself, both
+  when the form is submitted and again when the unattended job runs, so a value
+  posted back to the form (or replayed from a queued job) can never reach a file
+  the user is not entitled to share.
+- **Retention.** A completed staged upload referenced by a queued or running
+  publish is kept by the cleanup task even past its retention window, so the
+  background job still finds it. A publish queued by the older, draft-based form
+  is still honoured.
+
 ## 0.7.7 — 2026-09-09
 
 - **New Upload a large file tab.** The plugin's chunked uploader is normally
