@@ -61,7 +61,13 @@ class cleanup_chunks extends \core\task\scheduled_task {
 
         $this->purge(chunk_store::STATE_UNUSED, (int) $state0duration);
         $this->purge(chunk_store::STATE_STARTED, (int) $state1duration);
-        $this->purge(chunk_store::STATE_COMPLETED, (int) $state2duration);
+        // A completed staged upload referenced by a queued or running share publish
+        // is kept even past its retention, so the background job still finds it.
+        $this->purge(
+            chunk_store::STATE_COMPLETED,
+            (int) $state2duration,
+            \repository_largefile\local\transfer_manager::active_publish_tokens()
+        );
         $this->purge_orphaned_rows();
         $this->purge_export_files();
         $this->purge_expired_shares();
@@ -220,15 +226,24 @@ class cleanup_chunks extends \core\task\scheduled_task {
      *
      * @param int $state The chunk_store state to purge.
      * @param int $maxage Maximum age in seconds before a row is removed.
+     * @param array $excludeids Token ids to keep regardless of age (e.g. referenced
+     *              by a pending share publish).
      * @return void
      */
-    private function purge(int $state, int $maxage): void {
+    private function purge(int $state, int $maxage, array $excludeids = []): void {
         global $DB;
+        $select = 'lastmodified < :time AND state = :state';
+        $params = ['time' => time() - $maxage, 'state' => $state];
+        if ($excludeids) {
+            [$notinsql, $notinparams] = $DB->get_in_or_equal($excludeids, SQL_PARAMS_NAMED, 'ex', false);
+            $select .= " AND id $notinsql";
+            $params += $notinparams;
+        }
         $ids = $DB->get_fieldset_select(
             chunk_store::TABLE,
             'id',
-            'lastmodified < :time AND state = :state',
-            ['time' => time() - $maxage, 'state' => $state]
+            $select,
+            $params
         );
         // Delete each via chunk_store's state-guarded, locked path: the same lock a
         // Send-to/Restore admin action takes, so cleanup cannot pull the file out

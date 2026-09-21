@@ -142,9 +142,15 @@ $string['managepeers_desc'] = 'A trusted peer is another site running this plugi
 $string['manageshares'] = 'Backup shares';
 $string['manageshares_desc'] = 'Publish a backup to a trusted peer as an encrypted, expiring, download-limited link. The '
     . 'file is encrypted at rest and only the paired peer, signing with the shared secret, can fetch it.';
+$string['messageprovider:sharepublished'] = 'Backup share published';
 $string['nocompleteduploads'] = 'No completed uploads are waiting in the staging area.';
 $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
+$string['notifysharefailedbody'] = 'Your backup share for "{$a->filename}" could not be created: {$a->error}';
+$string['notifysharefailedsubject'] = 'Backup share failed: {$a}';
+$string['notifysharereadybody'] = 'Your backup "{$a}" has been encrypted and published. The share link is below — give it '
+    . 'to the receiving site to import.';
+$string['notifysharereadysubject'] = 'Backup share ready: {$a}';
 $string['notransfers'] = 'No transfers have been queued yet.';
 $string['nouploadsinprogress'] = 'No uploads are currently in progress.';
 $string['peercheck'] = 'Check connection';
@@ -260,6 +266,9 @@ $string['shareexpiry'] = 'Expires after';
 $string['shareexpiry_help'] = 'How long the share can be downloaded before it stops working. Leave the "Enable" box '
     . 'unticked for a share that never expires.';
 $string['sharefile'] = 'File to share';
+$string['sharefile_help'] = 'Choose a large file you have already staged through the uploader, or a backup already held in '
+    . 'Moodle — your backup area or private files, or a course backup you may download. The file is referenced, not '
+    . 'copied, and encrypted for the peer on the server in the background, so nothing large is copied when you submit.';
 $string['sharefilecol'] = 'File';
 $string['sharelinkcol'] = 'Share link';
 $string['sharelinkinfo'] = 'Give this link to the receiving site\'s administrator. They also need this site set up as a '
@@ -277,8 +286,16 @@ $string['sharepublishbackground_help'] = 'Recommended for large backups. The bac
 $string['sharequeued'] = 'The share is being created in the background. It will appear under "Backups being published" '
     . 'below, and its link in the shares list, when it is ready.';
 $string['sharesheading'] = 'Published shares';
+$string['sharesourcehint'] = 'To share a file too large for the browser upload dialogue, {$a} first; once it finishes it '
+    . 'appears in the list above to select.';
+$string['sharesourcelabel'] = '{$a->filename} ({$a->size}) — {$a->origin}';
+$string['sharesourceuploadlink'] = 'upload a large file';
 $string['sharingmanagement'] = 'Backup sharing';
 $string['showcompleteduploads'] = 'Show completed uploads ({$a})';
+$string['sourcebackuparea'] = 'My backup area';
+$string['sourcecoursebackup'] = 'Course backup';
+$string['sourceprivatefiles'] = 'My private files';
+$string['sourceuploaded'] = 'Uploaded large file';
 $string['tabupload'] = 'Upload a large file';
 $string['taburl'] = 'From a URL';
 $string['task:processtransfers'] = 'Run queued large-file transfers';

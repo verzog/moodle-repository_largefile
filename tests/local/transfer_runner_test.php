@@ -96,6 +96,8 @@ final class transfer_runner_test extends \advanced_testcase {
     public function test_share_publish_encrypts_and_links(): void {
         global $DB;
         $this->resetAfterTest(true);
+        // A completed publish now notifies the owner, so capture the message.
+        $this->redirectMessages();
         $user = $this->getDataGenerator()->create_user();
         $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
 
@@ -139,6 +141,8 @@ final class transfer_runner_test extends \advanced_testcase {
     public function test_share_publish_missing_source_fails(): void {
         global $DB;
         $this->resetAfterTest(true);
+        // A failed publish now notifies the owner, so capture the message.
+        $this->redirectMessages();
         $user = $this->getDataGenerator()->create_user();
         $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
 
@@ -154,6 +158,210 @@ final class transfer_runner_test extends \advanced_testcase {
 
         $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
         $this->assertSame(0, $DB->count_records('repository_largefile_shares'));
+    }
+
+    /**
+     * Stage a completed chunked upload owned by a user, as the uploader does.
+     *
+     * @param int $userid The owner.
+     * @param string $filename The staged file name.
+     * @param string $contents The staged plaintext.
+     * @return string The staged token id.
+     */
+    private function stage_completed_upload(int $userid, string $filename, string $contents): string {
+        $token = \repository_largefile\chunk_store::create_token_for(
+            $userid,
+            \context_system::instance()->id,
+            -1
+        );
+        $tmp = make_request_directory() . '/' . $filename;
+        file_put_contents($tmp, $contents);
+        \repository_largefile\chunk_store::adopt_file($token, $tmp, $filename);
+        return $token;
+    }
+
+    /**
+     * A publish that names a staged upload by token encrypts straight from the staged
+     * file, records a share with a link, and leaves the staged upload in place.
+     *
+     * @return void
+     */
+    public function test_share_publish_from_token(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        // Redirect messages so the completion notification does not error; delivery
+        // itself is the message subsystem's concern, not asserted here.
+        $this->redirectMessages();
+        $user = $this->getDataGenerator()->create_user();
+        $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
+
+        $token = $this->stage_completed_upload((int) $user->id, 'staged.mbz', 'PLAINTEXT-BACKUP');
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $user->id,
+            [
+                'peerid' => $peerid,
+                'expiryduration' => DAYSECS,
+                'maxdownloads' => 1,
+                'sourcetype' => backup_source::TYPE_TOKEN,
+                'token' => $token,
+            ],
+            0,
+            \context_system::instance()->id,
+            'staged.mbz'
+        );
+        transfer_runner::run(transfer_manager::get($id));
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status);
+        $this->assertStringContainsString('token=', (string) $transfer->result);
+        $this->assertEquals(1, $DB->count_records('repository_largefile_shares'));
+        // The staged upload is left in place (an ordinary completed upload the owner
+        // may reuse); it is not consumed by publishing.
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * A publish that names a backup already in Moodle encrypts straight from the
+     * stored file and leaves the original in place.
+     *
+     * @return void
+     */
+    public function test_share_publish_from_stored_file(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->redirectMessages();
+        $user = $this->getDataGenerator()->create_user();
+        $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
+
+        $usercontext = \context_user::instance((int) $user->id);
+        $file = get_file_storage()->create_file_from_string([
+            'contextid' => $usercontext->id,
+            'component' => 'user',
+            'filearea' => 'backup',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'course.mbz',
+        ], 'COURSE-BACKUP-CONTENTS');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $user->id,
+            [
+                'peerid' => $peerid,
+                'expiryduration' => 0,
+                'maxdownloads' => 1,
+                'sourcetype' => backup_source::TYPE_STORED,
+                'fileid' => (int) $file->get_id(),
+            ],
+            0,
+            \context_system::instance()->id,
+            'course.mbz'
+        );
+        transfer_runner::run(transfer_manager::get($id));
+
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, transfer_manager::get($id)->status);
+        $this->assertEquals(1, $DB->count_records('repository_largefile_shares'));
+        // The user's own backup is untouched.
+        $this->assertTrue(get_file_storage()->file_exists(
+            $usercontext->id,
+            'user',
+            'backup',
+            0,
+            '/',
+            'course.mbz'
+        ));
+    }
+
+    /**
+     * A publish that names a stored file the owner is not entitled to (here, another
+     * user's backup) fails cleanly and creates no share.
+     *
+     * @return void
+     */
+    public function test_share_publish_stored_file_unauthorised_fails(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->redirectMessages();
+        $owner = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
+
+        // A backup in a different user's private backup area.
+        $othercontext = \context_user::instance((int) $other->id);
+        $file = get_file_storage()->create_file_from_string([
+            'contextid' => $othercontext->id,
+            'component' => 'user',
+            'filearea' => 'backup',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'notyours.mbz',
+        ], 'SECRET');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $owner->id,
+            [
+                'peerid' => $peerid,
+                'expiryduration' => 0,
+                'maxdownloads' => 1,
+                'sourcetype' => backup_source::TYPE_STORED,
+                'fileid' => (int) $file->get_id(),
+            ],
+            0,
+            \context_system::instance()->id,
+            'notyours.mbz'
+        );
+        transfer_runner::run(transfer_manager::get($id));
+
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+        $this->assertSame(0, $DB->count_records('repository_largefile_shares'));
+    }
+
+    /**
+     * The cleanup task keeps a staged upload that a scheduled publish still needs,
+     * even past its retention window, and removes it once no live publish references it.
+     *
+     * @return void
+     */
+    public function test_cleanup_keeps_token_referenced_by_pending_publish(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        // Retire completed uploads immediately, so only the pending-publish guard
+        // could keep the staged file.
+        set_config('state2duration', 0, 'largefile');
+        $user = $this->getDataGenerator()->create_user();
+
+        $token = $this->stage_completed_upload((int) $user->id, 'pending.mbz', 'DATA');
+        // Backdate the staged upload so it is comfortably past its (zero) retention:
+        // the pending-publish guard, not its age, must be the only thing keeping it,
+        // and once nothing references it the same-second purge boundary cannot mask
+        // its removal.
+        $DB->set_field(
+            \repository_largefile\chunk_store::TABLE,
+            'lastmodified',
+            time() - 100,
+            ['id' => $token]
+        );
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_PUBLISH,
+            (int) $user->id,
+            ['peerid' => 1, 'sourcetype' => backup_source::TYPE_TOKEN, 'token' => $token],
+            0,
+            \context_system::instance()->id,
+            'pending.mbz'
+        );
+
+        (new \repository_largefile\task\cleanup_chunks())->execute();
+        $this->assertNotNull(
+            \repository_largefile\chunk_store::get_record($token),
+            'A staged upload referenced by a scheduled publish must survive cleanup.'
+        );
+
+        // Once the publish is cancelled, nothing references the token, so it is swept.
+        transfer_manager::cancel($id);
+        (new \repository_largefile\task\cleanup_chunks())->execute();
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
     }
 
     /**
