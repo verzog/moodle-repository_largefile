@@ -267,8 +267,11 @@ class transfer_runner {
             // source (or names another user's) cannot be published.
             $token = (string) ($payload['token'] ?? '');
             $record = \repository_largefile\chunk_store::get_record($token);
-            if (!$record || (int) $record->userid !== (int) $transfer->userid
-                    || !\repository_largefile\chunk_store::is_complete($token)) {
+            if (
+                !$record
+                || (int) $record->userid !== (int) $transfer->userid
+                || !\repository_largefile\chunk_store::is_complete($token)
+            ) {
                 throw new \moodle_exception('errorsharenofile', 'repository_largefile');
             }
             $path = \repository_largefile\chunk_store::get_path_for_id($token);

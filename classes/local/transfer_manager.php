@@ -412,9 +412,11 @@ class transfer_manager {
         $tokens = [];
         foreach ($rows as $row) {
             $payload = json_decode((string) $row->payload, true);
-            if (is_array($payload)
-                    && ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN
-                    && !empty($payload['token'])) {
+            if (
+                is_array($payload)
+                && ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN
+                && !empty($payload['token'])
+            ) {
                 $tokens[] = (string) $payload['token'];
             }
         }
