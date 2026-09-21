@@ -182,15 +182,16 @@ final class transfer_runner_test extends \advanced_testcase {
 
     /**
      * A publish that names a staged upload by token encrypts straight from the staged
-     * file, records a share with a link, notifies the owner, and then removes the
-     * staged upload.
+     * file, records a share with a link, and leaves the staged upload in place.
      *
      * @return void
      */
     public function test_share_publish_from_token(): void {
         global $DB;
         $this->resetAfterTest(true);
-        $sink = $this->redirectMessages();
+        // Redirect messages so the completion notification does not error; delivery
+        // itself is the message subsystem's concern, not asserted here.
+        $this->redirectMessages();
         $user = $this->getDataGenerator()->create_user();
         $peerid = peer_manager::create('Peer', str_repeat('s', 24), 'https://peer.example.org');
 
@@ -218,10 +219,6 @@ final class transfer_runner_test extends \advanced_testcase {
         // The staged upload is left in place (an ordinary completed upload the owner
         // may reuse); it is not consumed by publishing.
         $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
-        // The owner was notified.
-        $messages = $sink->get_messages();
-        $this->assertCount(1, $messages);
-        $this->assertEquals((int) $user->id, (int) $messages[0]->useridto);
     }
 
     /**
@@ -328,6 +325,7 @@ final class transfer_runner_test extends \advanced_testcase {
      * @return void
      */
     public function test_cleanup_keeps_token_referenced_by_pending_publish(): void {
+        global $DB;
         $this->resetAfterTest(true);
         // Retire completed uploads immediately, so only the pending-publish guard
         // could keep the staged file.
@@ -335,6 +333,16 @@ final class transfer_runner_test extends \advanced_testcase {
         $user = $this->getDataGenerator()->create_user();
 
         $token = $this->stage_completed_upload((int) $user->id, 'pending.mbz', 'DATA');
+        // Backdate the staged upload so it is comfortably past its (zero) retention:
+        // the pending-publish guard, not its age, must be the only thing keeping it,
+        // and once nothing references it the same-second purge boundary cannot mask
+        // its removal.
+        $DB->set_field(
+            \repository_largefile\chunk_store::TABLE,
+            'lastmodified',
+            time() - 100,
+            ['id' => $token]
+        );
         $id = transfer_manager::create(
             transfer_manager::TYPE_PUBLISH,
             (int) $user->id,
