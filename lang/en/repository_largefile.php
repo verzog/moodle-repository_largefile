@@ -363,6 +363,8 @@ $string['uploadtab_desc'] = 'Start a chunked upload of a large file without open
 $string['uploadtabgotransfers'] = 'Go to Transfers';
 $string['uploadtabstart'] = 'Start upload';
 $string['uploadtabsuccess'] = 'Upload complete.';
+$string['uploadwaiting'] = 'Waiting for the internet connection to come back — the upload continues automatically once it '
+    . 'does. Keep this tab open.';
 $string['url'] = 'File URL';
 $string['url_help'] = 'Paste a direct http(s) download link (for example a signed S3 link). The site fetches it on the '
     . 'server, so it is not limited by the browser upload size. The site upload limit still applies.';

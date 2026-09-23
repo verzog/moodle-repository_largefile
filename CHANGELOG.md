@@ -22,6 +22,13 @@ All notable changes to `repository_largefile` are documented here.
   the dialogue now says the earlier upload is no longer available and will start
   over, rather than silently resetting the counter to zero. A completed upload
   still staged on the server is never mistaken for an expired one.
+- **Pause through a connectivity loss instead of failing.** A dropped connection —
+  a laptop that sleeps, lost Wi-Fi — no longer burns through the retry budget in
+  half a minute and fails the upload. While the browser is offline the upload
+  pauses, showing "Waiting for the internet connection to come back", and continues
+  automatically the moment the connection returns (it listens for the browser's
+  `online` event). A genuine server-side error is still bounded and still fails
+  promptly. Applies to both the in-page and background-fetch resume paths.
 
 ## 0.7.8 — 2026-09-21
 
