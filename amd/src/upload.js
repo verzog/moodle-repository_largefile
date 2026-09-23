@@ -61,15 +61,13 @@ const STATE_COMPLETED = 2;
 const RESUME_KEY = 'repository_largefile_resume';
 
 /**
- * @constant {number} Discard a resume record older than this. The server is the
- * authority — a resume is only ever offered after the token is confirmed to still
- * exist — so this is just a generous upper bound that stops a record lingering in
- * localStorage forever. It is kept at a day (matching the background bound, and the
- * server's own default unfinished-upload retention) so a long stall — a laptop that
- * slept for hours — can still resume a partial the server has kept, rather than
- * being forgotten by the browser after an hour and silently starting over.
+ * @constant {number} Prune a resume record from localStorage once it is this old.
+ * This has no say in whether a resume is offered — the server is the sole authority
+ * there, a resume being offered only after {@see validateResume} confirms the token
+ * still exists — so it is purely storage hygiene, set well beyond any realistic
+ * server retention so it never forgets a partial the server would still resume.
  */
-const RESUME_TTL_MS = 24 * 60 * 60 * 1000;
+const RESUME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** @constant {string} localStorage key holding background-upload recovery records, keyed by token. */
 const RESUME_BG_KEY = 'repository_largefile_resume_bg';
@@ -273,18 +271,17 @@ const writeResume = (contextId, rec) => {
 };
 
 /**
- * The stored resume record for a context, or null when there is none or it has
- * aged out.
+ * The stored resume record for a context, or null when there is none. Age is not
+ * judged here: the server decides whether the partial still exists (the record is
+ * validated against it before any resume is offered), so a record is kept until the
+ * server rejects its token — a pause longer than a fixed client bound no longer
+ * loses a partial the server has retained.
  *
  * @param {number} contextId The context id.
  * @return {object|null} The record, or null.
  */
 const readResume = (contextId) => {
-    const rec = readResumeMap()[contextId];
-    if (!rec || (Date.now() - (rec.updated || 0)) > RESUME_TTL_MS) {
-        return null;
-    }
-    return rec;
+    return readResumeMap()[contextId] || null;
 };
 
 /**
@@ -788,18 +785,15 @@ const openUploadModal = async(data) => {
             return null;
         }
         const snap = parseJson(result.text);
-        // Dropping a record here means the server has definitively said the token is
-        // gone or finished (a transient failure returns earlier without dropping), so
-        // remember a foreground drop to explain a later fresh start for the same file.
-        const drop = () => {
-            if (rec.background) {
-                writeBgRecord(rec.token, null);
-            } else {
-                writeResume(data.contextId, null);
+        const drop = () => rec.background ? writeBgRecord(rec.token, null) : writeResume(data.contextId, null);
+        if (snap === null || snap.error !== undefined || snap.currentpos === undefined) {
+            // The server no longer has this token at all: re-selecting the same file
+            // will start over, so remember a foreground one to explain that rather than
+            // let the counter silently reset. Only a genuinely missing token counts as
+            // expired — a completed or mismatched token below does not.
+            if (!rec.background) {
                 expiredForeground = {filename: rec.filename, size: rec.size};
             }
-        };
-        if (snap === null || snap.error !== undefined || snap.currentpos === undefined) {
             drop();
             return null;
         }
@@ -812,6 +806,8 @@ const openUploadModal = async(data) => {
         }
         const currentpos = snap.length === rec.size ? snap.currentpos : 0;
         if (snap.state === STATE_COMPLETED || currentpos >= rec.size) {
+            // Already finished and staged on the server — nothing to resume, and not
+            // expired, so clearing the stale record is enough (no "expired" message).
             drop();
             return null;
         }

@@ -247,7 +247,7 @@ scheduled transfer, which runs on the server with no page open.
 |---|---|---|
 | Chunk size (MB) | 20 | Bytes per chunk. Lower it if large uploads fail behind a proxy/WAF that rejects big request bodies. |
 | Keep unused upload tokens for | 1 hour | Retention for a token that was created but never used. |
-| Keep unfinished uploads for | 1 hour | Retention for a partially uploaded file. |
+| Keep unfinished uploads for | 1 day | Retention for a partially uploaded file. Kept generous so a large upload that stalls (a sleeping laptop, a dropped connection) can still be resumed rather than started over. |
 | Keep completed uploads for | 1 day | Retention for a completed upload that was never selected. |
 
 ## Troubleshooting

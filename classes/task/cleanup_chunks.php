@@ -56,7 +56,9 @@ class cleanup_chunks extends \core\task\scheduled_task {
         // bare type name), the same place type_config_form() saves them.
         $config = get_config('largefile');
         $state0duration = $config->state0duration ?? 3600;
-        $state1duration = $config->state1duration ?? 3600;
+        // A day (matching the form default): a stalled large upload's partial must
+        // outlast a pause so the browser can resume it rather than start over.
+        $state1duration = $config->state1duration ?? 86400;
         $state2duration = $config->state2duration ?? 86400;
 
         $this->purge(chunk_store::STATE_UNUSED, (int) $state0duration);
