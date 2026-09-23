@@ -61,13 +61,13 @@ const STATE_COMPLETED = 2;
 const RESUME_KEY = 'repository_largefile_resume';
 
 /**
- * @constant {number} Discard a resume record older than this. Kept to one hour to
- * match the server's default retention of an unfinished upload (the
- * state1duration setting, default 3600s); the server is the authority — a resume
- * is only ever offered after the token is confirmed to still exist — so this just
- * avoids advertising a record whose partial file the cleanup task has removed.
+ * @constant {number} Prune a resume record from localStorage once it is this old.
+ * This has no say in whether a resume is offered — the server is the sole authority
+ * there, a resume being offered only after {@see validateResume} confirms the token
+ * still exists — so it is purely storage hygiene, set well beyond any realistic
+ * server retention so it never forgets a partial the server would still resume.
  */
-const RESUME_TTL_MS = 60 * 60 * 1000;
+const RESUME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** @constant {string} localStorage key holding background-upload recovery records, keyed by token. */
 const RESUME_BG_KEY = 'repository_largefile_resume_bg';
@@ -271,18 +271,17 @@ const writeResume = (contextId, rec) => {
 };
 
 /**
- * The stored resume record for a context, or null when there is none or it has
- * aged out.
+ * The stored resume record for a context, or null when there is none. Age is not
+ * judged here: the server decides whether the partial still exists (the record is
+ * validated against it before any resume is offered), so a record is kept until the
+ * server rejects its token — a pause longer than a fixed client bound no longer
+ * loses a partial the server has retained.
  *
  * @param {number} contextId The context id.
  * @return {object|null} The record, or null.
  */
 const readResume = (contextId) => {
-    const rec = readResumeMap()[contextId];
-    if (!rec || (Date.now() - (rec.updated || 0)) > RESUME_TTL_MS) {
-        return null;
-    }
-    return rec;
+    return readResumeMap()[contextId] || null;
 };
 
 /**
@@ -440,6 +439,68 @@ const parseJson = (text) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Wait out a connectivity loss: resolve as soon as the browser reports it is back
+ * online, the upload is cancelled, or a capped delay elapses (in case the 'online'
+ * event was missed while the tab was suspended). Lets an outage pause an upload for
+ * as long as it lasts rather than counting against its retry budget.
+ *
+ * @param {object} controller The {cancelled} abort controller.
+ * @param {number} capMs The most it will wait before re-checking anyway.
+ * @return {Promise} Resolves once back online, cancelled, or the cap elapses.
+ */
+const waitWhileOffline = (controller, capMs) => new Promise((resolve) => {
+    if (controller && controller.cancelled) {
+        resolve();
+        return;
+    }
+    let settled = false;
+    const finish = () => {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('online', finish);
+        }
+        resolve();
+    };
+    if (typeof window !== 'undefined') {
+        window.addEventListener('online', finish);
+    }
+    setTimeout(finish, capMs);
+});
+
+/**
+ * Pause before retrying a failed chunk. A connectivity loss — a status of 0 while
+ * the browser reports itself offline (a sleeping laptop, dropped Wi-Fi) — is a pause,
+ * not a countable failure: it waits for the connection to return without consuming
+ * the retry budget, so an outage of any length resumes when the machine is awake and
+ * online again. Any other transient failure backs off with the usual capped
+ * exponential delay and is counted by the caller.
+ *
+ * @param {object} result The failed {status} response.
+ * @param {number} attempt The attempt number, for the backoff curve.
+ * @param {object} controller The {cancelled} abort controller.
+ * @param {function|null} onWaiting Called with true while paused offline, false once it retries.
+ * @return {Promise<boolean>} True when this was an offline pause (the caller must not count it).
+ */
+const backoffBeforeRetry = async(result, attempt, controller, onWaiting) => {
+    const offline = result.status === 0 && typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (offline) {
+        if (onWaiting) {
+            onWaiting(true);
+        }
+        await waitWhileOffline(controller, BACKOFF_CAP_MS);
+        if (onWaiting) {
+            onWaiting(false);
+        }
+        return true;
+    }
+    await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, attempt - 1), BACKOFF_CAP_MS));
+    return false;
+};
+
+/**
  * Whether an HTTP status is a terminal client-side rejection. 408 and 429 are
  * transient and handled by the retry path; other 4xx responses are terminal.
  *
@@ -496,9 +557,10 @@ const queryStatus = async(token, controller) => {
  * @param {function} onProgress Callback given (bytesConfirmed, total).
  * @param {object} controller The {cancelled, xhr} abort controller.
  * @param {number} resumeFrom Byte offset already stored server-side (for a resumed upload).
+ * @param {function|null} onWaiting Called with true while paused offline, false once it resumes.
  * @return {Promise} Resolves true on success, false if cancelled, or rejects with a message.
  */
-const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, resumeFrom = 0) => {
+const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, resumeFrom = 0, onWaiting = null) => {
     let confirmed = resumeFrom;
     let retries = 0;
     // A resumed upload already has its first chunk stored, so every remaining
@@ -538,12 +600,21 @@ const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, 
             throw new Error(await getString(key, 'repository_largefile'));
         }
 
-        // Transient failure: back off, reconcile with the server, then retry.
-        if (retries >= MAX_RETRIES) {
-            throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+        // Transient failure. An offline period is a pause, not a countable failure —
+        // it waits for the connection and does not consume the retry budget — so an
+        // outage of any length (a sleeping laptop, dropped Wi-Fi) resumes when the
+        // machine is awake and online again; a server-side transient error stays
+        // bounded by MAX_RETRIES. Either way, reconcile with the server before retrying.
+        const paused = await backoffBeforeRetry(result, retries + 1, controller, onWaiting);
+        if (!paused) {
+            retries++;
+            if (retries > MAX_RETRIES) {
+                throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+            }
         }
-        retries++;
-        await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, retries - 1), BACKOFF_CAP_MS));
+        if (controller.cancelled) {
+            return false;
+        }
         if (started) {
             const snap = await queryStatus(token, controller);
             if (snap !== null && snap.length === file.size) {
@@ -572,9 +643,10 @@ const uploadFileChunked = async(file, token, chunkSize, onProgress, controller, 
  * @param {number} chunkSize The chunk size in bytes.
  * @param {function} onProgress Callback given (bytesConfirmed, total).
  * @param {object} controller The {cancelled, xhr} abort controller.
+ * @param {function|null} onWaiting Called with true while paused offline, false once it resumes.
  * @return {Promise} Resolves true on success, false if cancelled, or rejects with a message.
  */
-const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, controller) => {
+const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, controller, onWaiting = null) => {
     const statusResult = await postRequest({action: 'bgstatus', id: token}, null, null, null, controller);
     if (controller.cancelled) {
         return false;
@@ -593,7 +665,7 @@ const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, control
             const end = Math.min(start + chunkSize, gapEnd);
             const base = confirmed;
             const delivered = await uploadRangeChunk(file, token, start, end,
-                (loaded) => onProgress(base + loaded, file.size), controller);
+                (loaded) => onProgress(base + loaded, file.size), controller, onWaiting);
             if (!delivered) {
                 return false;
             }
@@ -617,9 +689,10 @@ const resumeBackgroundUpload = async(file, token, chunkSize, onProgress, control
  * @param {number} end Offset the chunk ends at (exclusive).
  * @param {function} onLoaded Callback given the bytes of this chunk uploaded so far.
  * @param {object} controller The {cancelled, xhr} abort controller.
+ * @param {function|null} onWaiting Called with true while paused offline, false once it resumes.
  * @return {Promise} Resolves true once delivered, false if cancelled; rejects on a terminal error.
  */
-const uploadRangeChunk = async(file, token, start, end, onLoaded, controller) => {
+const uploadRangeChunk = async(file, token, start, end, onLoaded, controller, onWaiting = null) => {
     let retries = 0;
     for (;;) {
         if (controller.cancelled) {
@@ -642,11 +715,15 @@ const uploadRangeChunk = async(file, token, start, end, onLoaded, controller) =>
             const key = result.status === 413 ? 'errorchunktoolarge' : 'erroruploadfailed';
             throw new Error(await getString(key, 'repository_largefile'));
         }
-        if (retries >= MAX_RETRIES) {
-            throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+        // An offline period pauses without counting against the retry budget, so a
+        // background-fetch resume also survives an outage of any length.
+        const paused = await backoffBeforeRetry(result, retries + 1, controller, onWaiting);
+        if (!paused) {
+            retries++;
+            if (retries > MAX_RETRIES) {
+                throw new Error(await getString('erroruploadfailed', 'repository_largefile'));
+            }
         }
-        retries++;
-        await sleep(Math.min(BACKOFF_BASE_MS * Math.pow(2, retries - 1), BACKOFF_CAP_MS));
     }
 };
 
@@ -705,6 +782,10 @@ const openUploadModal = async(data) => {
     let resumeCandidates = [];
     let pendingResume = null;
     let resumeActive = false;
+    // A previous foreground upload for this context whose partial the server no longer
+    // has (expired or swept): remembered so re-selecting that same file explains the
+    // fresh start ("your earlier upload expired") instead of silently resetting to 0.
+    let expiredForeground = null;
     // Set once a file has been handed to Background Fetch: the browser now owns the
     // upload, so closing the dialogue must not delete its token.
     let backgroundHandedOff = false;
@@ -784,6 +865,13 @@ const openUploadModal = async(data) => {
         const snap = parseJson(result.text);
         const drop = () => rec.background ? writeBgRecord(rec.token, null) : writeResume(data.contextId, null);
         if (snap === null || snap.error !== undefined || snap.currentpos === undefined) {
+            // The server no longer has this token at all: re-selecting the same file
+            // will start over, so remember a foreground one to explain that rather than
+            // let the counter silently reset. Only a genuinely missing token counts as
+            // expired — a completed or mismatched token below does not.
+            if (!rec.background) {
+                expiredForeground = {filename: rec.filename, size: rec.size};
+            }
             drop();
             return null;
         }
@@ -796,6 +884,8 @@ const openUploadModal = async(data) => {
         }
         const currentpos = snap.length === rec.size ? snap.currentpos : 0;
         if (snap.state === STATE_COMPLETED || currentpos >= rec.size) {
+            // Already finished and staged on the server — nothing to resume, and not
+            // expired, so clearing the stale record is enough (no "expired" message).
             drop();
             return null;
         }
@@ -887,6 +977,13 @@ const openUploadModal = async(data) => {
                     pendingResume = match;
                     resumeActive = true;
                     setStatus(await getString('resumeready', 'repository_largefile', selectedFile.name));
+                } else if (selectedFile && expiredForeground
+                        && selectedFile.name === expiredForeground.filename
+                        && selectedFile.size === expiredForeground.size) {
+                    // The server no longer has this file's earlier partial, so the upload
+                    // starts over — say so rather than silently resetting the counter to 0.
+                    hideResume();
+                    setStatus(await getString('uploadexpiredrestart', 'repository_largefile', selectedFile.name));
                 } else {
                     hideResume();
                     setStatus(selectedFile ? selectedFile.name : '');
@@ -1018,10 +1115,15 @@ const openUploadModal = async(data) => {
             writeResume(data.contextId, Object.assign({token: tokenId}, record));
         }
         hideResume();
-        setStatus(await getString('uploading', 'repository_largefile'));
+        const uploadingText = await getString('uploading', 'repository_largefile');
+        const waitingText = await getString('uploadwaiting', 'repository_largefile');
+        setStatus(uploadingText);
+        // While an offline period pauses the upload, show "waiting for the connection";
+        // switch back to "uploading" as soon as it resumes.
+        const onWaiting = (waiting) => setStatus(waiting ? waitingText : uploadingText);
         return run.backgroundResume
-            ? resumeBackgroundUpload(file, tokenId, chunkSize, setProgress, controller)
-            : uploadFileChunked(file, tokenId, chunkSize, setProgress, controller, resumeFrom);
+            ? resumeBackgroundUpload(file, tokenId, chunkSize, setProgress, controller, onWaiting)
+            : uploadFileChunked(file, tokenId, chunkSize, setProgress, controller, resumeFrom, onWaiting);
     };
 
     root.on(ModalEvents.save, async(e) => {

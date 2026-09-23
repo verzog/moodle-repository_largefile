@@ -342,6 +342,8 @@ $string['transferwhennow'] = 'As soon as possible';
 $string['unlimited'] = 'Unlimited';
 $string['uploadalreadyfinished'] = 'That upload had already finished, so there was nothing to remove.';
 $string['uploaded'] = 'File uploaded';
+$string['uploadexpiredrestart'] = 'Your earlier upload of "{$a}" is no longer available on the server, so it will start over '
+    . 'from the beginning.';
 $string['uploading'] = 'Uploading…';
 $string['uploadinstructions'] = 'The file is uploaded in small chunks, so PHP\'s per-request upload size does not apply. '
     . 'Keep this window open until the upload finishes.';
@@ -361,6 +363,8 @@ $string['uploadtab_desc'] = 'Start a chunked upload of a large file without open
 $string['uploadtabgotransfers'] = 'Go to Transfers';
 $string['uploadtabstart'] = 'Start upload';
 $string['uploadtabsuccess'] = 'Upload complete.';
+$string['uploadwaiting'] = 'Waiting for the internet connection to come back — the upload continues automatically once it '
+    . 'does. Keep this tab open.';
 $string['url'] = 'File URL';
 $string['url_help'] = 'Paste a direct http(s) download link (for example a signed S3 link). The site fetches it on the '
     . 'server, so it is not limited by the browser upload size. The site upload limit still applies.';

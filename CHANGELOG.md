@@ -2,6 +2,34 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.9 — 2026-09-23
+
+- **Resume a stalled upload after a long pause, instead of silently restarting.**
+  The browser judged an in-progress upload's resume pointer expired after a fixed
+  one hour, no matter how long the server keeps the partial, so a desktop upload
+  that stalled longer than that — a laptop that slept, a dropped connection — was
+  forgotten by the browser even though the server still held the partial, and
+  re-selecting the file started over from zero. The browser no longer imposes its
+  own time limit: the server is the sole authority, a resume being offered only
+  after the partial is confirmed to still exist, so any pause the server's
+  retention covers now resumes.
+- **A sensible default retention.** The "Keep unfinished uploads for" default (and
+  the cleanup task's fallback) is raised from 1 hour to 1 day, so a fresh install
+  keeps a stalled upload's partial long enough to resume without an administrator
+  first changing the setting.
+- **Say so when a partial really has expired.** When the server genuinely no longer
+  holds an earlier upload's partial and re-selecting the same file must start over,
+  the dialogue now says the earlier upload is no longer available and will start
+  over, rather than silently resetting the counter to zero. A completed upload
+  still staged on the server is never mistaken for an expired one.
+- **Pause through a connectivity loss instead of failing.** A dropped connection —
+  a laptop that sleeps, lost Wi-Fi — no longer burns through the retry budget in
+  half a minute and fails the upload. While the browser is offline the upload
+  pauses, showing "Waiting for the internet connection to come back", and continues
+  automatically the moment the connection returns (it listens for the browser's
+  `online` event). A genuine server-side error is still bounded and still fails
+  promptly. Applies to both the in-page and background-fetch resume paths.
+
 ## 0.7.8 — 2026-09-21
 
 - **Create a share by reference — no foreground copy.** The *Backup shares →

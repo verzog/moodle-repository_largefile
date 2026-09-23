@@ -245,7 +245,10 @@ class repository_largefile extends repository {
         $mform->addHelpButton('state0duration', 'setting:state0duration', 'repository_largefile');
 
         $mform->addElement('duration', 'state1duration', get_string('setting:state1duration', 'repository_largefile'));
-        $mform->setDefault('state1duration', 3600);
+        // A day, not an hour: a large upload can stall for a while (a laptop that
+        // sleeps, a dropped connection), and the partial must survive that gap so the
+        // browser can resume it rather than start over.
+        $mform->setDefault('state1duration', 86400);
         $mform->addHelpButton('state1duration', 'setting:state1duration', 'repository_largefile');
 
         $mform->addElement('duration', 'state2duration', get_string('setting:state2duration', 'repository_largefile'));
