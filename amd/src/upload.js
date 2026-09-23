@@ -61,13 +61,15 @@ const STATE_COMPLETED = 2;
 const RESUME_KEY = 'repository_largefile_resume';
 
 /**
- * @constant {number} Discard a resume record older than this. Kept to one hour to
- * match the server's default retention of an unfinished upload (the
- * state1duration setting, default 3600s); the server is the authority — a resume
- * is only ever offered after the token is confirmed to still exist — so this just
- * avoids advertising a record whose partial file the cleanup task has removed.
+ * @constant {number} Discard a resume record older than this. The server is the
+ * authority — a resume is only ever offered after the token is confirmed to still
+ * exist — so this is just a generous upper bound that stops a record lingering in
+ * localStorage forever. It is kept at a day (matching the background bound, and the
+ * server's own default unfinished-upload retention) so a long stall — a laptop that
+ * slept for hours — can still resume a partial the server has kept, rather than
+ * being forgotten by the browser after an hour and silently starting over.
  */
-const RESUME_TTL_MS = 60 * 60 * 1000;
+const RESUME_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** @constant {string} localStorage key holding background-upload recovery records, keyed by token. */
 const RESUME_BG_KEY = 'repository_largefile_resume_bg';
@@ -705,6 +707,10 @@ const openUploadModal = async(data) => {
     let resumeCandidates = [];
     let pendingResume = null;
     let resumeActive = false;
+    // A previous foreground upload for this context whose partial the server no longer
+    // has (expired or swept): remembered so re-selecting that same file explains the
+    // fresh start ("your earlier upload expired") instead of silently resetting to 0.
+    let expiredForeground = null;
     // Set once a file has been handed to Background Fetch: the browser now owns the
     // upload, so closing the dialogue must not delete its token.
     let backgroundHandedOff = false;
@@ -782,7 +788,17 @@ const openUploadModal = async(data) => {
             return null;
         }
         const snap = parseJson(result.text);
-        const drop = () => rec.background ? writeBgRecord(rec.token, null) : writeResume(data.contextId, null);
+        // Dropping a record here means the server has definitively said the token is
+        // gone or finished (a transient failure returns earlier without dropping), so
+        // remember a foreground drop to explain a later fresh start for the same file.
+        const drop = () => {
+            if (rec.background) {
+                writeBgRecord(rec.token, null);
+            } else {
+                writeResume(data.contextId, null);
+                expiredForeground = {filename: rec.filename, size: rec.size};
+            }
+        };
         if (snap === null || snap.error !== undefined || snap.currentpos === undefined) {
             drop();
             return null;
@@ -887,6 +903,13 @@ const openUploadModal = async(data) => {
                     pendingResume = match;
                     resumeActive = true;
                     setStatus(await getString('resumeready', 'repository_largefile', selectedFile.name));
+                } else if (selectedFile && expiredForeground
+                        && selectedFile.name === expiredForeground.filename
+                        && selectedFile.size === expiredForeground.size) {
+                    // The server no longer has this file's earlier partial, so the upload
+                    // starts over — say so rather than silently resetting the counter to 0.
+                    hideResume();
+                    setStatus(await getString('uploadexpiredrestart', 'repository_largefile', selectedFile.name));
                 } else {
                     hideResume();
                     setStatus(selectedFile ? selectedFile.name : '');

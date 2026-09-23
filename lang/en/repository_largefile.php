@@ -342,6 +342,8 @@ $string['transferwhennow'] = 'As soon as possible';
 $string['unlimited'] = 'Unlimited';
 $string['uploadalreadyfinished'] = 'That upload had already finished, so there was nothing to remove.';
 $string['uploaded'] = 'File uploaded';
+$string['uploadexpiredrestart'] = 'Your earlier upload of "{$a}" is no longer available on the server, so it will start over '
+    . 'from the beginning.';
 $string['uploading'] = 'Uploading…';
 $string['uploadinstructions'] = 'The file is uploaded in small chunks, so PHP\'s per-request upload size does not apply. '
     . 'Keep this window open until the upload finishes.';

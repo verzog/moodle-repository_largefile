@@ -2,6 +2,24 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.7.9 — 2026-09-23
+
+- **Resume a stalled upload after a long pause, instead of silently restarting.**
+  The browser remembered an in-progress upload's resume pointer for only one
+  hour (`RESUME_TTL_MS`), regardless of the server's "Keep unfinished uploads
+  for" setting. So if a desktop upload stalled longer than an hour — a laptop
+  that slept, a dropped connection — the browser forgot the upload even though
+  the server still held the partial, and re-selecting the file started over from
+  zero. The client bound is now a day (matching the background bound and the
+  server's default retention), and the server remains the authority: a resume is
+  still only offered after the token is confirmed to still exist, so a partial
+  the cleanup task really has removed is never falsely offered.
+- **Say so when a partial really has expired.** When the server no longer holds
+  an earlier upload's partial and re-selecting the same file must start over, the
+  dialogue now shows "Your earlier upload … is no longer available on the server,
+  so it will start over" rather than silently resetting the progress counter to
+  zero.
+
 ## 0.7.8 — 2026-09-21
 
 - **Create a share by reference — no foreground copy.** The *Backup shares →
