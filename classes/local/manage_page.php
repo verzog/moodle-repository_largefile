@@ -286,9 +286,9 @@ class manage_page {
             }
         }
         $users = $userids ? $DB->get_records_list('user', 'id', array_keys($userids)) : [];
-        // Uploads a queued or running restore or send is working on: their actions
-        // would race the background job, so the row just says a job is in hand.
-        $queued = array_flip(transfer_manager::active_consumer_tokens());
+        // Uploads a queued or running job still needs (a restore, send or share
+        // publication): their actions would race it, so the row just says so.
+        $queued = array_flip(transfer_manager::active_source_tokens());
         // Restore… is offered when either restore route is available to this user
         // (copy into a course's backup area, or restore automatically into a new
         // course); worked out once here, not per row.

@@ -126,7 +126,7 @@ if ($action === 'removeallstalled') {
 if ($action === 'sendcompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
-    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_consumer_tokens(), true)) {
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_source_tokens(), true)) {
         redirect($baseurl, get_string('uploadbusyqueued', 'repository_largefile'));
     }
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
@@ -199,9 +199,9 @@ if ($action === 'sendcompleted') {
         // transfer: the runner re-checks the policy and rights, copies the file
         // under cron into the operator's destination (not the upload owner's: a
         // manager may route someone else's upload into their own areas or the
-        // course they picked), then notifies the operator. The check for an
-        // already-queued job and the queueing happen under the upload's lock, so
-        // two operators submitting at once cannot both queue it.
+        // course they picked), then notifies the operator. The upload is re-checked
+        // and the job queued under the upload's lock, so two operators submitting
+        // at once cannot both queue it.
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($record->id, 10);
         if (!$lock) {
@@ -213,8 +213,20 @@ if ($action === 'sendcompleted') {
             );
         }
         try {
-            $alreadyqueued = in_array((string) $record->id, transfer_manager::active_consumer_tokens(), true);
-            if (!$alreadyqueued) {
+            // Re-check the upload under its lock: a Remove or cleanup run may have
+            // taken it since the form was shown, and a job that needs it (a restore,
+            // send or share publication) may have been queued meanwhile.
+            $fresh = chunk_store::get_record($record->id);
+            $freshpath = $fresh ? chunk_store::get_path_for_id($fresh->id) : null;
+            $blocked = null;
+            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
+                $blocked = 'completeduploadgone';
+            } else if (!$freshpath || !file_exists($freshpath)) {
+                $blocked = 'completeduploadnofile';
+            } else if (in_array((string) $record->id, transfer_manager::active_source_tokens(), true)) {
+                $blocked = 'uploadalreadyqueued';
+            }
+            if ($blocked === null) {
                 transfer_manager::create(
                     transfer_manager::TYPE_SEND,
                     (int) $USER->id,
@@ -232,8 +244,8 @@ if ($action === 'sendcompleted') {
         } finally {
             $lock->release();
         }
-        if ($alreadyqueued) {
-            redirect($baseurl, get_string('uploadalreadyqueued', 'repository_largefile'));
+        if ($blocked !== null) {
+            redirect($baseurl, get_string($blocked, 'repository_largefile'));
         }
         redirect(
             $baseurl,
@@ -325,10 +337,10 @@ if ($action === 'restorecompleted') {
         }
         $payload += ['token' => (string) $record->id, 'filesize' => (int) $record->length];
 
-        // Both kinds of restore run in the background, so never queue a second one
-        // for the same upload while one is still waiting or running. The check and
-        // the queueing happen under the upload's lock, so two operators submitting
-        // at once cannot both get through.
+        // Both kinds of restore run in the background, so never queue one for an
+        // upload another job still needs. The upload is re-checked and the job
+        // queued under the upload's lock, so two operators submitting at once cannot
+        // both get through.
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($record->id, 10);
         if (!$lock) {
@@ -340,15 +352,27 @@ if ($action === 'restorecompleted') {
             );
         }
         try {
-            $alreadyqueued = in_array((string) $record->id, transfer_manager::active_consumer_tokens(), true);
-            if (!$alreadyqueued) {
+            // Re-check the upload under its lock: a Remove or cleanup run may have
+            // taken it since the form was shown, and a job that needs it (a restore,
+            // send or share publication) may have been queued meanwhile.
+            $fresh = chunk_store::get_record($record->id);
+            $freshpath = $fresh ? chunk_store::get_path_for_id($fresh->id) : null;
+            $blocked = null;
+            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
+                $blocked = 'completeduploadgone';
+            } else if (!$freshpath || !file_exists($freshpath)) {
+                $blocked = 'completeduploadnofile';
+            } else if (in_array((string) $record->id, transfer_manager::active_source_tokens(), true)) {
+                $blocked = 'uploadalreadyqueued';
+            }
+            if ($blocked === null) {
                 transfer_manager::create($type, (int) $USER->id, $payload, 0, $contextid, (string) $record->filename);
             }
         } finally {
             $lock->release();
         }
-        if ($alreadyqueued) {
-            redirect($baseurl, get_string('uploadalreadyqueued', 'repository_largefile'));
+        if ($blocked !== null) {
+            redirect($baseurl, get_string($blocked, 'repository_largefile'));
         }
         redirect(
             $baseurl,
@@ -371,7 +395,7 @@ if ($action === 'restorecompleted') {
 if ($action === 'removecompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
-    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_consumer_tokens(), true)) {
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_source_tokens(), true)) {
         redirect($baseurl, get_string('uploadbusyqueued', 'repository_largefile'));
     }
     $outcome = $uploadid !== ''
@@ -555,12 +579,13 @@ if ($transfers) {
             } else {
                 $outcome = s((string) $transfer->result);
             }
-            // A completed send links to where the file landed.
-            if ($transfer->type === transfer_manager::TYPE_SEND) {
-                $outcome .= ' · ' . html_writer::link(
-                    \repository_largefile\local\transfer_runner::send_url($transfer),
-                    get_string('sendopendestination', 'repository_largefile')
-                );
+            // A completed send links to where the file landed, when the viewer can
+            // open it (another operator's private files cannot be).
+            $sendurl = $transfer->type === transfer_manager::TYPE_SEND
+                ? \repository_largefile\local\transfer_runner::send_url($transfer, (int) $USER->id)
+                : null;
+            if ($sendurl) {
+                $outcome .= ' · ' . html_writer::link($sendurl, get_string('sendopendestination', 'repository_largefile'));
             }
             // A prepared restore links straight into the restore wizard on the file.
             $restoreurl = $transfer->type === transfer_manager::TYPE_RESTORE

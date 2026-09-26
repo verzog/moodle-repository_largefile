@@ -13,9 +13,18 @@ All notable changes to `repository_largefile` are documented here.
   sent a notification. Like the restore jobs it re-checks the site policy and the
   operator's rights when it runs, and is restart-safe: a retry after an interrupted
   cron run finishes up a copy that had already landed instead of copying again.
-- An upload with a restore or send queued is shown as "Queued" on Completed
-  uploads, and cannot be removed, sent, restored or swept by the cleanup task until
-  that job has run.
+- An upload that a queued job still needs (a restore, a send or a share
+  publication) is shown as "Queued" on Completed uploads, and cannot be removed,
+  sent, restored or swept by the cleanup task until that job has run. An upload
+  with a restore or send queued is no longer offered as the source of a new backup
+  share, which would have found it already consumed. Each of these is decided under
+  the upload's lock, with the upload re-checked there, so racing requests cannot
+  slip past.
+- A retried copy only adopts a file of its checkpointed name when it really is its
+  own copy (by file id, or by content hash while the source remains), never an
+  unrelated file that took the name while the job waited.
+- The "Open destination" link for a send to private files is shown only to the
+  operator it was sent for, as that page shows the viewer's own files.
 
 ## 0.8.0 — 2026-09-26
 

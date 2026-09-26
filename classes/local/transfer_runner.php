@@ -140,15 +140,17 @@ class transfer_runner {
     }
 
     /**
-     * Where a completed send's file can be found: a course's restore screen for the
-     * course backup area, the private files page for private files, and otherwise
-     * the Transfers page (the user backup area has no page of its own; it is listed
-     * on every course's restore screen).
+     * Where a completed send's file can be found, for a given viewer: a course's
+     * restore screen for the course backup area, or the private files page for
+     * private files — but only for the operator the file was sent for, since that
+     * page shows the *viewer's* own files. The user backup area has no page of its
+     * own (it is listed on every course's restore screen), so it has no link.
      *
      * @param \stdClass $transfer A send transfer row.
-     * @return \moodle_url The URL.
+     * @param int $viewerid The user the link is for.
+     * @return \moodle_url|null The URL, or null when there is nothing the viewer can open.
      */
-    public static function send_url(\stdClass $transfer): \moodle_url {
+    public static function send_url(\stdClass $transfer, int $viewerid): ?\moodle_url {
         $payload = transfer_manager::payload($transfer);
         $destination = (string) ($payload['destination'] ?? '');
         if ($destination === import_policy::DEST_COURSEBACKUP) {
@@ -157,10 +159,10 @@ class transfer_runner {
             if ($coursecontext) {
                 return new \moodle_url('/backup/restorefile.php', ['contextid' => $coursecontext->id]);
             }
-        } else if ($destination === import_policy::DEST_PRIVATEFILES) {
+        } else if ($destination === import_policy::DEST_PRIVATEFILES && $viewerid === (int) $transfer->userid) {
             return new \moodle_url('/user/files.php');
         }
-        return new \moodle_url('/repository/largefile/transfers.php');
+        return null;
     }
 
     /**
@@ -212,7 +214,7 @@ class transfer_runner {
         $send = $transfer->type === transfer_manager::TYPE_SEND;
         $url = null;
         if ($error === null && $send) {
-            $url = self::send_url($transfer);
+            $url = self::send_url($transfer, (int) $transfer->userid);
         } else if ($error === null) {
             // An automatic restore's result is the new course's id; a prepared one's
             // is the backup file waiting for the restore wizard.
@@ -669,6 +671,55 @@ class transfer_runner {
     }
 
     /**
+     * The copy an earlier, interrupted attempt of this transfer already stored, if
+     * any — and only if it really is that copy, not an unrelated file that took the
+     * same name while the job waited to be retried.
+     *
+     * Either the stored file's id was checkpointed after the copy (the reliable
+     * case), or only the target name was, when the attempt died between storing
+     * the file and recording its id. The source is only removed after the id is
+     * recorded, so in that second case it is still there, and a file of that name
+     * counts as ours only when its content hash matches the source's. Hashing the
+     * source is slow for a large file, but it only happens on this rare path.
+     *
+     * @param array $payload Decoded payload; may hold 'storedfileid', 'storedname' and 'token'.
+     * @param int $contextid Target context id.
+     * @param string $component Target component.
+     * @param string $filearea Target file area.
+     * @return string|null The stored file name, or null when there is no such copy.
+     */
+    private static function find_checkpointed_copy(
+        array $payload,
+        int $contextid,
+        string $component,
+        string $filearea
+    ): ?string {
+        $fs = get_file_storage();
+        $fileid = (int) ($payload['storedfileid'] ?? 0);
+        if ($fileid > 0) {
+            $file = $fs->get_file_by_id($fileid);
+            if (
+                $file
+                    && (int) $file->get_contextid() === $contextid
+                    && $file->get_component() === $component
+                    && $file->get_filearea() === $filearea
+            ) {
+                return $file->get_filename();
+            }
+        }
+        $name = (string) ($payload['storedname'] ?? '');
+        if ($name === '') {
+            return null;
+        }
+        $file = $fs->get_file($contextid, $component, $filearea, 0, '/', $name);
+        $srcpath = \repository_largefile\chunk_store::get_path_for_id((string) ($payload['token'] ?? ''));
+        if (!$file || !$srcpath || !is_file($srcpath) || (int) $file->get_filesize() !== (int) filesize($srcpath)) {
+            return null;
+        }
+        return sha1_file($srcpath) === $file->get_contenthash() ? $name : null;
+    }
+
+    /**
      * Copy a completed chunked upload into a file area and remove the upload.
      *
      * Hashing and copying a multi-gigabyte file into the file pool takes minutes,
@@ -677,10 +728,11 @@ class transfer_runner {
      * or delete the source mid-copy.
      *
      * Restart-safe: the target file name is checkpointed on the transfer (as
-     * 'storedname') before the copy. A retry after an interrupted attempt that
-     * finds that file already stored — a file record only exists once its content is
-     * fully stored — just finishes the clean-up, rather than copying again or failing
-     * on the consumed upload.
+     * 'storedname') before the copy, and the stored file's id (as 'storedfileid')
+     * after it, before the source is removed. A retry after an interrupted attempt
+     * that finds its own copy already stored ({@see self::find_checkpointed_copy()})
+     * just finishes the clean-up, rather than copying again or failing on the
+     * consumed upload.
      *
      * @param \stdClass $transfer The transfer row (its file name is set from the upload).
      * @param array $payload Decoded payload; expects 'token', may hold 'storedname'.
@@ -707,9 +759,9 @@ class transfer_runner {
             throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
         }
         try {
-            // An earlier, interrupted attempt already stored the copy: finish up.
-            $done = (string) ($payload['storedname'] ?? '');
-            if ($done !== '' && $fs->file_exists($contextid, $component, $filearea, 0, '/', $done)) {
+            // An earlier, interrupted attempt may already have stored the copy.
+            $done = self::find_checkpointed_copy($payload, $contextid, $component, $filearea);
+            if ($done !== null) {
                 if (\repository_largefile\chunk_store::get_record($token)) {
                     \repository_largefile\chunk_store::delete($token);
                 }
@@ -734,7 +786,7 @@ class transfer_runner {
                 $filename = time() . '-' . $filename;
             }
             transfer_manager::set_payload_value((int) $transfer->id, 'storedname', $filename);
-            $fs->create_file_from_pathname([
+            $stored = $fs->create_file_from_pathname([
                 'contextid' => $contextid,
                 'component' => $component,
                 'filearea' => $filearea,
@@ -743,6 +795,9 @@ class transfer_runner {
                 'filename' => $filename,
                 'userid' => (int) $transfer->userid,
             ], $srcpath);
+            // Record which file is ours before the source goes, so a retry can tell
+            // it from an unrelated file that later took the same name.
+            transfer_manager::set_payload_value((int) $transfer->id, 'storedfileid', (int) $stored->get_id());
             // Remove the row and its file via chunk_store::delete(), which keeps the
             // row for the cleanup task if the bytes cannot be removed.
             \repository_largefile\chunk_store::delete((string) $record->id);

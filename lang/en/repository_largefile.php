@@ -388,10 +388,10 @@ $string['transferwhenat'] = 'At a scheduled time';
 $string['transferwhennow'] = 'As soon as possible';
 $string['unlimited'] = 'Unlimited';
 $string['uploadalreadyfinished'] = 'That upload had already finished, so there was nothing to remove.';
-$string['uploadalreadyqueued'] = 'A restore or send of that upload is already queued or running. Watch its progress in the '
-    . 'transfer queue below.';
-$string['uploadbusyqueued'] = 'That upload has a restore or send queued or running, so it cannot be removed, sent or restored '
-    . 'until that job has finished.';
+$string['uploadalreadyqueued'] = 'Another job that needs this upload (a restore, send or share) is already queued or '
+    . 'running. Watch its progress in the transfer queue below.';
+$string['uploadbusyqueued'] = 'A job that needs this upload (a restore, send or share) is queued or running, so it '
+    . 'cannot be removed, sent or restored until that job has finished.';
 $string['uploaded'] = 'File uploaded';
 $string['uploadexpiredrestart'] = 'Your earlier upload of "{$a}" is no longer available on the server, so it will start over '
     . 'from the beginning.';
