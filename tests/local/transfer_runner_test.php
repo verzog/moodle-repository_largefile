@@ -397,4 +397,361 @@ final class transfer_runner_test extends \advanced_testcase {
         );
         $this->assertEmpty($staged);
     }
+
+    /**
+     * Enable the Large file repository type, as it is on a site that uses it.
+     *
+     * Moodle drops notifications from a disabled plugin's message providers, and a
+     * fresh test site has no repository instance for this plugin, so without this
+     * the restore notifications would never reach the message sink.
+     *
+     * @return void
+     */
+    private function enable_repository(): void {
+        global $DB;
+        if (!$DB->record_exists('repository', ['type' => 'largefile'])) {
+            $DB->insert_record('repository', (object) ['type' => 'largefile', 'visible' => 1, 'sortorder' => 1]);
+        }
+        \core_plugin_manager::reset_caches();
+    }
+
+    /**
+     * A queued restore preparation copies the completed upload into the chosen
+     * course's backup area, consumes the upload, links to the restore wizard and
+     * notifies the operator.
+     *
+     * @return void
+     */
+    public function test_restore_prep_copies_into_course_backup_area(): void {
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $course = $this->getDataGenerator()->create_course();
+        $token = $this->stage_completed_upload((int) $admin->id, 'course.mbz', 'BACKUPDATA');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_RESTORE,
+            (int) $admin->id,
+            ['token' => $token, 'courseid' => (int) $course->id],
+            0,
+            \context_course::instance($course->id)->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $this->assertSame('course.mbz', $transfer->result);
+        $file = get_file_storage()->get_file(
+            \context_course::instance($course->id)->id,
+            'backup',
+            'course',
+            0,
+            '/',
+            'course.mbz'
+        );
+        $this->assertNotFalse($file);
+        $this->assertSame('BACKUPDATA', $file->get_content());
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+
+        $url = transfer_runner::restore_url($transfer);
+        $this->assertNotNull($url);
+        $this->assertSame($file->get_pathnamehash(), $url->get_param('pathnamehash'));
+
+        $this->assertCount(1, $messages);
+        $this->assertSame('restoreready', $messages[0]->eventtype);
+    }
+
+    /**
+     * A restore preparation queued by a user who cannot restore into the course fails
+     * and leaves the completed upload untouched.
+     *
+     * @return void
+     */
+    public function test_restore_prep_without_capability_fails(): void {
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $user = $this->getDataGenerator()->create_user();
+        $course = $this->getDataGenerator()->create_course();
+        $token = $this->stage_completed_upload((int) $user->id, 'course.mbz', 'BACKUPDATA');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_RESTORE,
+            (int) $user->id,
+            ['token' => $token, 'courseid' => (int) $course->id],
+            0,
+            \context_course::instance($course->id)->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * An automatic restore queued by a user who cannot create courses in the category
+     * fails without creating a course, and leaves the completed upload untouched.
+     *
+     * @return void
+     */
+    public function test_auto_restore_without_capability_fails(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $user = $this->getDataGenerator()->create_user();
+        $category = $this->getDataGenerator()->create_category();
+        $token = $this->stage_completed_upload((int) $user->id, 'course.mbz', 'BACKUPDATA');
+        $coursecount = $DB->count_records('course');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $user->id,
+            ['token' => $token, 'categoryid' => (int) $category->id],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+        $this->assertSame($coursecount, $DB->count_records('course'));
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * An automatic restore of a real course backup creates a new course in the chosen
+     * category holding the backed-up content, and consumes the completed upload.
+     *
+     * @return void
+     */
+    public function test_auto_restore_creates_course_in_category(): void {
+        global $CFG, $DB, $USER;
+        require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $generator = $this->getDataGenerator();
+        $source = $generator->create_course(['fullname' => 'Source course', 'shortname' => 'SRC']);
+        $generator->create_module('page', ['course' => $source->id, 'name' => 'Restored page']);
+        $category = $generator->create_category();
+
+        // Back the course up, then stage the .mbz as a completed chunked upload.
+        $bc = new \backup_controller(
+            \backup::TYPE_1COURSE,
+            $source->id,
+            \backup::FORMAT_MOODLE,
+            \backup::INTERACTIVE_NO,
+            \backup::MODE_GENERAL,
+            (int) $admin->id
+        );
+        $bc->execute_plan();
+        $backupfile = $bc->get_results()['backup_destination'];
+        $bc->destroy();
+        $token = $this->stage_completed_upload((int) $admin->id, 'source.mbz', $backupfile->get_content());
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $admin->id,
+            ['token' => $token, 'categoryid' => (int) $category->id],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            'source.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $messages = $sink->get_messages();
+        $sink->close();
+        $this->assertEquals((int) $admin->id, (int) $USER->id, 'The task user must be put back after the restore.');
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $newcourse = $DB->get_record('course', ['id' => (int) $transfer->result], '*', MUST_EXIST);
+        $this->assertNotEquals((int) $source->id, (int) $newcourse->id);
+        $this->assertEquals((int) $category->id, (int) $newcourse->category);
+        $this->assertTrue($DB->record_exists('page', ['course' => $newcourse->id, 'name' => 'Restored page']));
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+        $this->assertCount(1, $messages);
+        $this->assertSame('restoreready', $messages[0]->eventtype);
+    }
+
+    /**
+     * The cleanup task keeps a staged upload that a queued restore still needs.
+     *
+     * @return void
+     */
+    public function test_cleanup_keeps_token_referenced_by_pending_restore(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        set_config('state2duration', 0, 'largefile');
+        $user = $this->getDataGenerator()->create_user();
+        $token = $this->stage_completed_upload((int) $user->id, 'pending.mbz', 'DATA');
+        $DB->set_field(
+            \repository_largefile\chunk_store::TABLE,
+            'lastmodified',
+            time() - 100,
+            ['id' => $token]
+        );
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $user->id,
+            ['token' => $token, 'categoryid' => 1],
+            0,
+            \context_system::instance()->id,
+            'pending.mbz'
+        );
+
+        (new \repository_largefile\task\cleanup_chunks())->execute();
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+
+        transfer_manager::cancel($id);
+        (new \repository_largefile\task\cleanup_chunks())->execute();
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * A restore preparation retried after an interrupted attempt that had already
+     * stored the copy finishes up instead of copying again or failing.
+     *
+     * @return void
+     */
+    public function test_restore_prep_retry_after_copy_finishes_up(): void {
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $course = $this->getDataGenerator()->create_course();
+        $coursecontext = \context_course::instance($course->id);
+        $token = $this->stage_completed_upload((int) $admin->id, 'course.mbz', 'BACKUPDATA');
+        // The earlier attempt checkpointed its target name and stored the copy, then died.
+        get_file_storage()->create_file_from_string([
+            'contextid' => $coursecontext->id,
+            'component' => 'backup',
+            'filearea' => 'course',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'course.mbz',
+        ], 'BACKUPDATA');
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_RESTORE,
+            (int) $admin->id,
+            ['token' => $token, 'courseid' => (int) $course->id, 'storedname' => 'course.mbz'],
+            0,
+            $coursecontext->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $this->assertSame('course.mbz', $transfer->result);
+        $files = get_file_storage()->get_area_files($coursecontext->id, 'backup', 'course', 0, 'id', false);
+        $this->assertCount(1, $files, 'The retry must not store a second copy.');
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * An automatic restore retried after an interrupted attempt whose restore had
+     * already finished returns that course instead of restoring a second one.
+     *
+     * @return void
+     */
+    public function test_auto_restore_retry_after_restore_finishes_up(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $category = $this->getDataGenerator()->create_category();
+        $restored = $this->getDataGenerator()->create_course(['category' => $category->id]);
+        $token = $this->stage_completed_upload((int) $admin->id, 'course.mbz', 'BACKUPDATA');
+        $coursecount = $DB->count_records('course');
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $admin->id,
+            [
+                'token' => $token,
+                'categoryid' => (int) $category->id,
+                'courseid' => (int) $restored->id,
+                'restored' => 1,
+            ],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $this->assertEquals((int) $restored->id, (int) $transfer->result);
+        $this->assertSame($coursecount, $DB->count_records('course'));
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+    }
+
+    /**
+     * Removing every completed upload in bulk leaves alone an upload that a queued
+     * restore still needs.
+     *
+     * @return void
+     */
+    public function test_bulk_remove_keeps_upload_of_queued_restore(): void {
+        $this->resetAfterTest(true);
+        $user = $this->getDataGenerator()->create_user();
+        $kept = $this->stage_completed_upload((int) $user->id, 'kept.mbz', 'DATA');
+        $gone = $this->stage_completed_upload((int) $user->id, 'gone.mbz', 'DATA');
+        transfer_manager::create(
+            transfer_manager::TYPE_RESTORE,
+            (int) $user->id,
+            ['token' => $kept, 'courseid' => 2],
+            0,
+            \context_system::instance()->id,
+            'kept.mbz'
+        );
+
+        $removed = \repository_largefile\chunk_store::delete_all_in_state(
+            \repository_largefile\chunk_store::STATE_COMPLETED,
+            transfer_manager::active_source_tokens()
+        );
+        $this->assertSame(1, $removed);
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($kept));
+        $this->assertNull(\repository_largefile\chunk_store::get_record($gone));
+    }
+
+    /**
+     * With the course backup area destination disabled, the automatic restore is
+     * still offered to a user who may create courses; the wizard route is not.
+     *
+     * @return void
+     */
+    public function test_available_restore_modes(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+        $this->assertSame(
+            [
+                \repository_largefile\form\completed_restore_form::MODE_WIZARD,
+                \repository_largefile\form\completed_restore_form::MODE_AUTO,
+            ],
+            \repository_largefile\form\completed_restore_form::available_modes()
+        );
+        set_config('dest_coursebackup', 0, 'largefile');
+        $this->assertSame(
+            [\repository_largefile\form\completed_restore_form::MODE_AUTO],
+            \repository_largefile\form\completed_restore_form::available_modes()
+        );
+        $this->setUser($this->getDataGenerator()->create_user());
+        $this->assertSame([], \repository_largefile\form\completed_restore_form::available_modes());
+    }
 }

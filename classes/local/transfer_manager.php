@@ -52,6 +52,19 @@ class transfer_manager {
     public const TYPE_PUBLISH = 'sharepublish';
 
     /**
+     * @var string A copy of a completed chunked upload (.mbz) into a course's backup
+     * area, ready for the restore wizard. Queued rather than done in the web request
+     * because hashing and copying a multi-gigabyte backup outlasts any web timeout.
+     */
+    public const TYPE_RESTORE = 'restoreprep';
+
+    /**
+     * @var string An unattended restore of a completed chunked upload (.mbz) into a
+     * new course in a chosen category, with the site's default restore settings.
+     */
+    public const TYPE_AUTORESTORE = 'autorestore';
+
+    /**
      * @var string Filearea (at the system context, keyed by transfer id) holding a
      * queued publication's plaintext source until the runner encrypts it. It is
      * plugin-owned rather than a draft file, so Moodle's draft cleanup cannot remove
@@ -230,6 +243,29 @@ class transfer_manager {
     }
 
     /**
+     * Record a checkpoint in a transfer's payload, merged into what is there.
+     *
+     * A long job that is interrupted (worker restart, host shutdown) is retried by
+     * {@see self::reclaim_stale()}; a checkpoint lets the retry recognise work the
+     * earlier attempt already finished instead of repeating a non-idempotent step.
+     *
+     * @param int $id The transfer id.
+     * @param string $key The payload key.
+     * @param mixed $value The value to store (JSON-serialisable).
+     * @return void
+     */
+    public static function set_payload_value(int $id, string $key, $value): void {
+        global $DB;
+        $transfer = self::get($id);
+        if (!$transfer) {
+            return;
+        }
+        $payload = self::payload($transfer);
+        $payload[$key] = $value;
+        $DB->set_field(self::TABLE, 'payload', json_encode($payload), ['id' => $id]);
+    }
+
+    /**
      * Record the transfer's file name once it becomes known (a URL import learns it
      * from the response, a share import from the peer's metadata), so the Transfers
      * table shows what is being moved while the job is still running.
@@ -401,30 +437,72 @@ class transfer_manager {
     }
 
     /**
-     * Staged-upload tokens referenced by a publish transfer that has not finished.
+     * Staged-upload tokens referenced by a transfer that has not finished.
      *
-     * The reference-based create-share form queues a publish that names a staged
-     * upload by token rather than copying it, so the cleanup task must not sweep that
-     * staged file while a scheduled or running share still needs it.
+     * A reference-based publish and a queued restore both name a staged upload by
+     * token rather than copying it, so the cleanup task must not sweep that staged
+     * file while a scheduled or running job still needs it.
      *
      * @return array List of chunk_store token ids (strings).
      */
-    public static function active_publish_tokens(): array {
+    public static function active_source_tokens(): array {
         global $DB;
-        [$insql, $params] = $DB->get_in_or_equal(
+        [$statussql, $params] = $DB->get_in_or_equal(
             [self::STATUS_SCHEDULED, self::STATUS_RUNNING],
-            SQL_PARAMS_NAMED
+            SQL_PARAMS_NAMED,
+            'st'
         );
-        $params['type'] = self::TYPE_PUBLISH;
-        $rows = $DB->get_records_select(self::TABLE, "type = :type AND status $insql", $params, '', 'id, payload');
+        [$typesql, $typeparams] = $DB->get_in_or_equal(
+            [self::TYPE_PUBLISH, self::TYPE_RESTORE, self::TYPE_AUTORESTORE],
+            SQL_PARAMS_NAMED,
+            'ty'
+        );
+        $params += $typeparams;
+        $rows = $DB->get_records_select(
+            self::TABLE,
+            "type $typesql AND status $statussql",
+            $params,
+            '',
+            'id, type, payload'
+        );
         $tokens = [];
         foreach ($rows as $row) {
             $payload = json_decode((string) $row->payload, true);
-            if (
-                is_array($payload)
-                && ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN
-                && !empty($payload['token'])
-            ) {
+            if (!is_array($payload) || empty($payload['token'])) {
+                continue;
+            }
+            // A publish names a token only for a token-sourced share; a restore always does.
+            if ($row->type !== self::TYPE_PUBLISH || ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN) {
+                $tokens[] = (string) $payload['token'];
+            }
+        }
+        return $tokens;
+    }
+
+    /**
+     * Staged-upload tokens with a restore queued or running, so the Transfers page
+     * can show them as being prepared rather than offering Restore a second time.
+     *
+     * @return array List of chunk_store token ids (strings).
+     */
+    public static function active_restore_tokens(): array {
+        global $DB;
+        [$statussql, $params] = $DB->get_in_or_equal(
+            [self::STATUS_SCHEDULED, self::STATUS_RUNNING],
+            SQL_PARAMS_NAMED,
+            'st'
+        );
+        [$typesql, $typeparams] = $DB->get_in_or_equal(
+            [self::TYPE_RESTORE, self::TYPE_AUTORESTORE],
+            SQL_PARAMS_NAMED,
+            'ty'
+        );
+        $params += $typeparams;
+        $rows = $DB->get_records_select(self::TABLE, "type $typesql AND status $statussql", $params, '', 'id, payload');
+        $tokens = [];
+        foreach ($rows as $row) {
+            $payload = json_decode((string) $row->payload, true);
+            if (is_array($payload) && !empty($payload['token'])) {
                 $tokens[] = (string) $payload['token'];
             }
         }

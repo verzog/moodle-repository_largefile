@@ -64,11 +64,12 @@ class cleanup_chunks extends \core\task\scheduled_task {
         $this->purge(chunk_store::STATE_UNUSED, (int) $state0duration);
         $this->purge(chunk_store::STATE_STARTED, (int) $state1duration);
         // A completed staged upload referenced by a queued or running share publish
-        // is kept even past its retention, so the background job still finds it.
+        // or restore is kept even past its retention, so the background job still
+        // finds it.
         $this->purge(
             chunk_store::STATE_COMPLETED,
             (int) $state2duration,
-            \repository_largefile\local\transfer_manager::active_publish_tokens()
+            \repository_largefile\local\transfer_manager::active_source_tokens()
         );
         $this->purge_orphaned_rows();
         $this->purge_export_files();
