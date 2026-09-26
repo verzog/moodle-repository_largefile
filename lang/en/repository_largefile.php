@@ -66,6 +66,8 @@ $string['errordownloadhttp'] = 'The server returned HTTP status {$a} for that UR
 $string['errordownloadstalled'] = 'The transfer stalled: no bytes arrived from the peer for the stall window (see the plugin\'s "Stall a peer download after" setting). This is different from a slow but progressing transfer, which is allowed to take as long as needed. Check the peer\'s reachability and its outgoing bandwidth.';
 $string['errordownloadtoobig'] = 'The file at that URL is larger than the site upload limit.';
 $string['erroremptyfile'] = 'The selected file is empty.';
+$string['errornocategorycap'] = 'You do not have permission to create and restore a course in that category.';
+$string['errornocategorychosen'] = 'Choose the category to restore the new course into.';
 $string['errornocoursebackupcap'] = 'You do not have permission to add a backup to that course.';
 $string['errornocoursechosen'] = 'Choose the course whose backup area the file should go to.';
 $string['errorpeerbadurl'] = 'Enter the peer\'s site URL as a full http(s) address, for example https://peer.example.org.';
@@ -74,8 +76,12 @@ $string['errorpeerinsecureurl'] = 'The peer\'s site URL must use https. Signed d
 $string['errorpeernourl'] = 'This peer has no Site URL, so its connection cannot be checked. Edit the peer and add its '
     . 'address.';
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
+$string['errorrestorebusy'] = 'That completed upload is busy with another action (Send to…, Remove or another restore). '
+    . 'Try again shortly.';
+$string['errorrestoreextract'] = 'The backup file could not be unpacked. It may be incomplete or not a Moodle backup.';
 $string['errorrestorenotbackup'] = 'Only a Moodle course backup (.mbz) can be restored directly. Use Send to… to route the '
     . 'file into a real destination first.';
+$string['errorrestoreprecheck'] = 'The restore checks failed: {$a}';
 $string['errorsecrettooshort'] = 'Use a longer shared secret (at least 24 characters). Generate a random one and paste '
     . 'the same value on both sites.';
 $string['errorsharedecrypt'] = 'The shared backup could not be decrypted. The pairing secret may be wrong, or the file '
@@ -142,10 +148,17 @@ $string['managepeers_desc'] = 'A trusted peer is another site running this plugi
 $string['manageshares'] = 'Backup shares';
 $string['manageshares_desc'] = 'Publish a backup to a trusted peer as an encrypted, expiring, download-limited link. The '
     . 'file is encrypted at rest and only the paired peer, signing with the shared secret, can fetch it.';
+$string['messageprovider:restoreready'] = 'Queued course restore finished';
 $string['messageprovider:sharepublished'] = 'Backup share published';
 $string['nocompleteduploads'] = 'No completed uploads are waiting in the staging area.';
 $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
+$string['notifyrestoredbody'] = 'Your backup "{$a}" has been restored into a new course. Open it here:';
+$string['notifyrestoredsubject'] = 'Course restored: {$a}';
+$string['notifyrestorefailedbody'] = 'The restore of "{$a->filename}" failed: {$a->error}';
+$string['notifyrestorefailedsubject'] = 'Restore failed: {$a}';
+$string['notifyrestorereadybody'] = 'Your backup "{$a}" has been copied into the course backup area. Continue the restore here:';
+$string['notifyrestorereadysubject'] = 'Backup ready to restore: {$a}';
 $string['notifysharefailedbody'] = 'Your backup share for "{$a->filename}" could not be created: {$a->error}';
 $string['notifysharefailedsubject'] = 'Backup share failed: {$a}';
 $string['notifysharereadybody'] = 'Your backup "{$a}" has been encrypted and published. The share link is below — give it '
@@ -207,14 +220,36 @@ $string['privacy:metadata:repository_largefile_transfers:type'] = 'The kind of t
 $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user the transfer runs for.';
 $string['removeallcompleted'] = 'Remove all completed uploads';
 $string['removeallstalled'] = 'Remove all stalled uploads';
+$string['restorealreadyqueued'] = 'A restore of that upload is already queued or running. Watch its progress in the transfer '
+    . 'queue below.';
+$string['restoreautocategory'] = 'Category for the new course';
+$string['restoreautocategory_help'] = 'The category the new course is created in. The site\'s default category is preselected. '
+    . 'Only categories where you may both create a course and restore into it are listed.';
+$string['restoreautoqueued'] = 'The restore of "{$a}" into a new course has been queued. It runs in the background (it starts '
+    . 'within about five minutes and a large backup can take a long time); you will be sent a notification with a link to '
+    . 'the course when it finishes. You can close this page.';
 $string['restorecompleted'] = 'Restore…';
-$string['restorecompleted_desc'] = 'Restore this completed upload directly on a course. The backup file is copied into that '
-    . 'course\'s backup area and Moodle\'s restore wizard opens on it — no need to reopen the large file picker.';
-$string['restorecompletedbutton'] = 'Copy to course and restore';
+$string['restorecompleted_desc'] = 'Restore this completed upload directly. Large backups are processed in the background, so this '
+    . 'page will not time out: you are notified when it is done, and the transfer queue below shows its progress.';
+$string['restorecompletedbutton'] = 'Queue restore';
 $string['restorecompletedcourse'] = 'Target course';
 $string['restorecompletedcourse_help'] = 'The course to restore the backup into. Only courses you may both upload a backup '
     . 'into and start a restore in are listed.';
 $string['restorecompletedheading'] = 'Restore a completed upload';
+$string['restorecontinue'] = 'Continue to restore';
+$string['restorecopying'] = 'Copying the backup into the course backup area';
+$string['restoreinprogress'] = 'Restore queued — see the transfer queue below';
+$string['restoremode'] = 'How to restore';
+$string['restoremode_help'] = 'Either copy the backup into an existing course\'s backup area and then choose the restore '
+    . 'settings in Moodle\'s restore wizard, or restore it automatically into a new course using the site\'s default '
+    . 'restore settings. Both run in the background.';
+$string['restoremodeauto'] = 'Restore automatically into a new course (default restore settings)';
+$string['restoremodewizard'] = 'Copy into an existing course, then open the restore wizard';
+$string['restorequeued'] = '"{$a}" has been queued to be copied into the course backup area. It runs in the background '
+    . '(it starts within about five minutes); when it is ready you will be sent a notification, and a "Continue to '
+    . 'restore" link appears in the transfer queue below. You can close this page.';
+$string['restorerunning'] = 'Restoring into a new course';
+$string['restoreviewcourse'] = 'View the restored course';
 $string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
     . 'file to carry on where you left off, or choose a different file to start over.';
 $string['resumeready'] = 'Ready to resume "{$a}" — the upload will continue from where it stopped.';
@@ -329,7 +364,9 @@ $string['transferstatus_running'] = 'Running';
 $string['transferstatus_scheduled'] = 'Scheduled';
 $string['transferstoring'] = 'encrypted, storing the file';
 $string['transfertype'] = 'Type';
+$string['transfertypeautorestore'] = 'Automatic restore (new course)';
 $string['transfertypepublish'] = 'Backup share (publish)';
+$string['transfertyperestore'] = 'Restore preparation';
 $string['transfertypeshare'] = 'Peer share import';
 $string['transfertypeurl'] = 'URL import';
 $string['transferurl'] = 'File URL';

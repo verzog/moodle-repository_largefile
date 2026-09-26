@@ -233,6 +233,25 @@ with their owner and status, and lets an administrator cancel a queued transfer
 or clear a finished one. Finished transfers are pruned after a week by the cleanup
 task.
 
+**Restoring a completed upload.** A finished chunked upload of a course backup
+(`.mbz`) has a **Restore…** action under *Completed uploads*. Both of its options
+run in the background as a queued transfer, so even a backup of tens of gigabytes
+never hits a web-request timeout:
+
+- **Copy into an existing course, then open the restore wizard** — the backup is
+  copied into that course's backup area; when it is ready you are notified and a
+  **Continue to restore** link appears in the transfer queue, opening Moodle's
+  restore wizard on the file so you can choose the restore settings.
+- **Restore automatically into a new course** — the backup is restored unattended
+  into a new course in the chosen category (the site's default category is
+  preselected) with the site's default restore settings, and you are notified with
+  a link to the course when it finishes. It unpacks the backup straight from the
+  upload, so it needs no second full-size copy in the file store. It requires
+  `moodle/course:create` and `moodle/restore:restorecourse` in the category.
+
+Queued transfers are started by the `process_transfers` task, which runs every five
+minutes, so a restore starts within about five minutes of being queued.
+
 **Why local uploads can't be unattended.** A file on your own computer can only be
 read by the page that's open, so the chunked uploader now *warns you before you
 navigate away* from an upload still in progress — but it cannot keep uploading a

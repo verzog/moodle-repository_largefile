@@ -2,6 +2,28 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.8.0 — 2026-09-26
+
+- **Restoring a large completed upload no longer times out.** "Restore…" on the
+  Transfers page used to copy the whole backup into the course backup area inside
+  the web request; for a very large backup (tens of gigabytes) that takes minutes,
+  and the web server or proxy gave up with a gateway timeout long before it
+  finished. The copy now runs in the background as a queued transfer: the page
+  returns straight away, the transfer queue shows the job's progress, and when it
+  is ready the operator is sent a notification — and the queue shows a "Continue
+  to restore" link — that opens Moodle's restore wizard on the file. The upload's
+  row on Completed uploads shows "Restore queued" meanwhile, so it cannot be
+  restored twice or removed from under the job, and the cleanup task keeps it until
+  the job has run.
+- **Automatic restore into a new course.** The Restore… form has a second option:
+  restore the backup unattended into a new course in a chosen category (the site's
+  default category is preselected), using the site's default restore settings. It
+  runs entirely in the background, unpacking the backup straight from the upload —
+  so, unlike the wizard route, it does not first need a second full-size copy in
+  the file store — and notifies the operator with a link to the new course when it
+  finishes. Only categories where the operator may create a course and restore are
+  offered, and the rights are re-checked when the job runs.
+
 ## 0.7.9 — 2026-09-23
 
 - **Resume a stalled upload after a long pause, instead of silently restarting.**

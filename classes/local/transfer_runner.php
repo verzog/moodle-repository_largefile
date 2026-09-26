@@ -62,6 +62,10 @@ class transfer_runner {
                 $result = self::run_share_import($transfer, $payload);
             } else if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 $result = self::run_share_publish($transfer, $payload);
+            } else if ($transfer->type === transfer_manager::TYPE_RESTORE) {
+                $result = self::run_restore_prep($transfer, $payload);
+            } else if ($transfer->type === transfer_manager::TYPE_AUTORESTORE) {
+                $result = self::run_auto_restore($transfer, $payload);
             } else {
                 throw new \moodle_exception('errortransferunknown', 'repository_largefile');
             }
@@ -69,11 +73,16 @@ class transfer_runner {
             \repository_largefile\event\transfer_completed::for_transfer($transfer, $result)->trigger();
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 self::notify_publish((int) $transfer->userid, (string) $transfer->filename, $result, null);
+            } else if (self::is_restore($transfer)) {
+                $transfer->result = $result;
+                self::notify_restore($transfer, null);
             }
         } catch (\Throwable $e) {
             transfer_manager::mark_failed((int) $transfer->id, $e->getMessage());
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 self::notify_publish((int) $transfer->userid, (string) $transfer->filename, null, $e->getMessage());
+            } else if (self::is_restore($transfer)) {
+                self::notify_restore($transfer, $e->getMessage());
             }
         }
     }
@@ -93,6 +102,123 @@ class transfer_runner {
             null,
             (string) ($transfer->error ?? '')
         );
+    }
+
+    /**
+     * Whether a transfer is one of the two restore kinds, which notify their operator.
+     *
+     * @param \stdClass $transfer A transfer row.
+     * @return bool True for a prepared or an automatic restore.
+     */
+    public static function is_restore(\stdClass $transfer): bool {
+        return in_array($transfer->type, [transfer_manager::TYPE_RESTORE, transfer_manager::TYPE_AUTORESTORE], true);
+    }
+
+    /**
+     * Notify the operator of a restore that was failed outside {@see self::run()}
+     * (e.g. by {@see transfer_manager::reclaim_stale()}), so they are not left
+     * waiting for a restore link that will never come.
+     *
+     * @param \stdClass $transfer The failed restore transfer row (with its error set).
+     * @return void
+     */
+    public static function notify_restore_failure(\stdClass $transfer): void {
+        self::notify_restore($transfer, (string) ($transfer->error ?? ''));
+    }
+
+    /**
+     * The restore wizard URL for a completed restore-preparation transfer: Moodle's
+     * restore.php pinned to the backup file the transfer placed in the course backup
+     * area, so the operator lands straight on the first restore step.
+     *
+     * @param \stdClass $transfer A restore transfer row whose result is the stored file name.
+     * @return \moodle_url|null The URL, or null when the course or the file is gone.
+     */
+    public static function restore_url(\stdClass $transfer): ?\moodle_url {
+        $courseid = (int) (transfer_manager::payload($transfer)['courseid'] ?? 0);
+        $filename = (string) ($transfer->result ?? '');
+        if ($courseid <= 0 || $filename === '') {
+            return null;
+        }
+        $coursecontext = \context_course::instance($courseid, IGNORE_MISSING);
+        if (!$coursecontext) {
+            return null;
+        }
+        $file = get_file_storage()->get_file($coursecontext->id, 'backup', 'course', 0, '/', $filename);
+        if (!$file) {
+            return null;
+        }
+        return new \moodle_url('/backup/restore.php', [
+            'contextid' => $coursecontext->id,
+            'pathnamehash' => $file->get_pathnamehash(),
+            'contenthash' => $file->get_contenthash(),
+        ]);
+    }
+
+    /**
+     * Tell the operator a queued restore is ready — with a link straight into the
+     * restore wizard — or that it failed. A messaging failure is swallowed: the
+     * outcome is already recorded on the transfer row, so it must not fail the job.
+     *
+     * @param \stdClass $transfer The restore transfer row (with result set on success).
+     * @param string|null $error The failure message, or null on success.
+     * @return void
+     */
+    private static function notify_restore(\stdClass $transfer, ?string $error): void {
+        $user = \core_user::get_user((int) $transfer->userid);
+        if (!$user) {
+            return;
+        }
+        $name = (string) ($transfer->filename ?? '') !== '' ? (string) $transfer->filename : '-';
+        $auto = $transfer->type === transfer_manager::TYPE_AUTORESTORE;
+        $url = null;
+        if ($error === null) {
+            // An automatic restore's result is the new course's id; a prepared one's
+            // is the backup file waiting for the restore wizard.
+            $url = $auto
+                ? new \moodle_url('/course/view.php', ['id' => (int) $transfer->result])
+                : self::restore_url($transfer);
+        }
+        $url = $url ?? new \moodle_url('/repository/largefile/transfers.php');
+
+        $message = new \core\message\message();
+        $message->component = 'repository_largefile';
+        $message->name = 'restoreready';
+        $message->userfrom = \core_user::get_noreply_user();
+        $message->userto = $user;
+        $message->notification = 1;
+        $message->courseid = SITEID;
+        $message->contexturl = $url->out(false);
+        if ($error === null && $auto) {
+            $message->contexturlname = get_string('restoreviewcourse', 'repository_largefile');
+            $message->subject = get_string('notifyrestoredsubject', 'repository_largefile', $name);
+            $body = get_string('notifyrestoredbody', 'repository_largefile', $name) . "\n\n" . $url->out(false);
+        } else if ($error === null) {
+            $message->contexturlname = get_string('restorecontinue', 'repository_largefile');
+            $message->subject = get_string('notifyrestorereadysubject', 'repository_largefile', $name);
+            $body = get_string('notifyrestorereadybody', 'repository_largefile', $name) . "\n\n" . $url->out(false);
+        } else {
+            $message->contexturlname = get_string('transfers', 'repository_largefile');
+            $message->subject = get_string('notifyrestorefailedsubject', 'repository_largefile', $name);
+            $body = get_string(
+                'notifyrestorefailedbody',
+                'repository_largefile',
+                (object) ['filename' => $name, 'error' => $error]
+            );
+        }
+        $message->fullmessage = $body;
+        $message->fullmessageformat = FORMAT_PLAIN;
+        $message->fullmessagehtml = text_to_html($body);
+        $message->smallmessage = $message->subject;
+
+        try {
+            message_send($message);
+        } catch (\Throwable $e) {
+            debugging(
+                'repository_largefile: restore notification could not be sent: ' . $e->getMessage(),
+                DEBUG_DEVELOPER
+            );
+        }
     }
 
     /**
@@ -371,5 +497,205 @@ class transfer_runner {
         transfer_manager::delete_publish_source((int) $transfer->id);
 
         return (new \moodle_url('/repository/largefile/share.php', ['token' => $share->token]))->out(false);
+    }
+
+    /**
+     * Copy a completed chunked upload (.mbz) into a course's backup area, ready for
+     * the restore wizard.
+     *
+     * This is the slow half of "Restore…" on the Transfers page: hashing and copying
+     * a multi-gigabyte backup into the file pool takes minutes, far longer than a web
+     * request survives behind a proxy, so it runs here under cron instead. The job
+     * runs unattended, so the operator's rights are re-checked now rather than
+     * trusted from when it was queued.
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param array $payload Decoded payload; expects 'token' and 'courseid'.
+     * @return string The stored backup file name in the course backup area.
+     * @throws \moodle_exception If the upload is gone or the operator lacks the rights.
+     */
+    private static function run_restore_prep(\stdClass $transfer, array $payload): string {
+        $userid = (int) $transfer->userid;
+        $token = (string) ($payload['token'] ?? '');
+        $courseid = (int) ($payload['courseid'] ?? 0);
+        $coursecontext = $courseid > 0 ? \context_course::instance($courseid, IGNORE_MISSING) : null;
+        if (
+            !$coursecontext
+                || !has_capability('repository/largefile:import', \context_system::instance(), $userid)
+                || !has_capability('moodle/restore:uploadfile', $coursecontext, $userid)
+                || !has_capability('moodle/restore:restorecourse', $coursecontext, $userid)
+        ) {
+            throw new \moodle_exception('errornocoursebackupcap', 'repository_largefile');
+        }
+
+        // Hold the same per-token lock the Transfers page actions (Send to…, Remove)
+        // take, so none of them can move or delete the source while it is copied.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
+        if (!$lock) {
+            throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
+        }
+        try {
+            $record = \repository_largefile\chunk_store::get_record($token);
+            if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
+                throw new \moodle_exception('completeduploadgone', 'repository_largefile');
+            }
+            $srcpath = \repository_largefile\chunk_store::get_path_for_id($record->id);
+            if (!$srcpath || !is_file($srcpath)) {
+                throw new \moodle_exception('completeduploadnofile', 'repository_largefile');
+            }
+            if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
+                throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
+            }
+            transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
+            $stored = import_policy::store_imported_file(
+                $userid,
+                $srcpath,
+                (string) $record->filename,
+                import_policy::DEST_COURSEBACKUP,
+                (int) $record->contextid,
+                $courseid
+            );
+            // Remove the row via chunk_store::delete(), which re-attempts the source
+            // unlink and keeps the row for the cleanup task if the bytes remain.
+            \repository_largefile\chunk_store::delete((string) $record->id);
+            return $stored;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Restore a completed chunked upload (.mbz) unattended into a new course in a
+     * chosen category, with the site's default restore settings.
+     *
+     * Mirrors core's admin/cli/restore_backup.php. The backup is unpacked straight
+     * from the staged upload into the backup temp directory — no copy into the file
+     * pool first, which for a very large backup saves both time and its full size in
+     * disk. The staged upload is removed only once the restore has succeeded, so a
+     * failed restore can simply be tried again.
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param array $payload Decoded payload; expects 'token' and 'categoryid'.
+     * @return string The new course's id.
+     * @throws \moodle_exception If the upload is gone, the operator lacks the rights,
+     *         or the restore's prechecks fail.
+     */
+    private static function run_auto_restore(\stdClass $transfer, array $payload): string {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/backup/util/includes/restore_includes.php');
+
+        $userid = (int) $transfer->userid;
+        $token = (string) ($payload['token'] ?? '');
+        $categoryid = (int) ($payload['categoryid'] ?? 0);
+        $catcontext = $categoryid > 0 ? \context_coursecat::instance($categoryid, IGNORE_MISSING) : null;
+        if (
+            !$catcontext
+                || !has_capability('repository/largefile:import', \context_system::instance(), $userid)
+                || !has_capability('moodle/course:create', $catcontext, $userid)
+                || !has_capability('moodle/restore:restorecourse', $catcontext, $userid)
+        ) {
+            throw new \moodle_exception('errornocategorycap', 'repository_largefile');
+        }
+
+        // Unpack under the same per-token lock the Transfers page actions take, so the
+        // source cannot be moved or removed mid-read; the restore itself then works
+        // from the unpacked copy and needs no lock.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
+        if (!$lock) {
+            throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
+        }
+        $backupdir = \restore_controller::get_tempdir_name(SITEID, $userid);
+        $path = make_backup_temp_directory($backupdir);
+        try {
+            try {
+                $record = \repository_largefile\chunk_store::get_record($token);
+                if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
+                    throw new \moodle_exception('completeduploadgone', 'repository_largefile');
+                }
+                $srcpath = \repository_largefile\chunk_store::get_path_for_id($record->id);
+                if (!$srcpath || !is_file($srcpath)) {
+                    throw new \moodle_exception('completeduploadnofile', 'repository_largefile');
+                }
+                if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
+                    throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
+                }
+                transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
+                $packer = get_file_packer('application/vnd.moodle.backup');
+                if (!$packer->extract_to_pathname($srcpath, $path)) {
+                    throw new \moodle_exception('errorrestoreextract', 'repository_largefile');
+                }
+            } finally {
+                $lock->release();
+            }
+
+            [$fullname, $shortname] = \restore_dbops::calculate_course_names(
+                0,
+                get_string('restoringcourse', 'backup'),
+                get_string('restoringcourseshortname', 'backup')
+            );
+            $courseid = \restore_dbops::create_new_course($fullname, $shortname, $categoryid);
+            $rc = null;
+            try {
+                $rc = new \restore_controller(
+                    $backupdir,
+                    $courseid,
+                    \backup::INTERACTIVE_NO,
+                    \backup::MODE_GENERAL,
+                    $userid,
+                    \backup::TARGET_NEW_COURSE
+                );
+                if ($rc->get_status() == \backup::STATUS_REQUIRE_CONV) {
+                    $rc->convert();
+                }
+                if (!$rc->execute_precheck()) {
+                    $results = $rc->get_precheck_results();
+                    throw new \moodle_exception(
+                        'errorrestoreprecheck',
+                        'repository_largefile',
+                        '',
+                        implode('; ', $results['errors'] ?? [])
+                    );
+                }
+                $rc->execute_plan();
+                $isfullcourse = $rc->get_type() === \backup::TYPE_1COURSE;
+                $info = $rc->get_info();
+            } catch (\Throwable $e) {
+                // Do not leave the empty placeholder course behind.
+                delete_course($courseid, false);
+                throw $e;
+            } finally {
+                if ($rc) {
+                    $rc->destroy();
+                }
+            }
+
+            // A course backup names the new course itself; an activity or section
+            // backup does not, so name the course after the backup's original course
+            // (as the core CLI restore does) instead of leaving the placeholder name.
+            if (!$isfullcourse) {
+                [$fullname, $shortname] = \restore_dbops::calculate_course_names(
+                    0,
+                    $info->original_course_fullname ?? get_string('restoretonewcourse', 'backup'),
+                    $info->original_course_shortname ?? get_string('newcourse')
+                );
+                $DB->update_record('course', (object) [
+                    'id' => $courseid,
+                    'fullname' => $fullname,
+                    'shortname' => $shortname,
+                    'visible' => 1,
+                ]);
+            }
+        } finally {
+            // A successful plan removes its own temp directory; a failed one may not.
+            if (is_dir($path)) {
+                fulldelete($path);
+            }
+        }
+
+        // The restore succeeded, so the staged upload has served its purpose.
+        \repository_largefile\chunk_store::delete_in_state($token, \repository_largefile\chunk_store::STATE_COMPLETED);
+        return (string) $courseid;
     }
 }

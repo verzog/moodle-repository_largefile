@@ -286,6 +286,9 @@ class manage_page {
             }
         }
         $users = $userids ? $DB->get_records_list('user', 'id', array_keys($userids)) : [];
+        // Uploads a queued or running restore is working on: their actions would race
+        // the background job, so the row just says a restore is in hand.
+        $restoring = array_flip(transfer_manager::active_restore_tokens());
         $table = new \html_table();
         $table->head = [
             get_string('transferuser', 'repository_largefile'),
@@ -296,6 +299,16 @@ class manage_page {
         ];
         foreach ($completed as $row) {
             $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
+            if (isset($restoring[(string) $row->id])) {
+                $table->data[] = [
+                    $user ? fullname($user) : '—',
+                    format_string((string) $row->filename),
+                    display_size((int) $row->length),
+                    userdate((int) $row->lastmodified),
+                    get_string('restoreinprogress', 'repository_largefile'),
+                ];
+                continue;
+            }
             // Send the file straight to a real destination (backup area, course
             // backup area, private files) without the user having to reopen the
             // large-file picker to select it — a slow step for a big backup.

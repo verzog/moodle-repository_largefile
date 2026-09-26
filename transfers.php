@@ -251,10 +251,11 @@ if ($action === 'sendcompleted') {
     echo $OUTPUT->footer();
     exit;
 }
-// Restore a completed .mbz upload directly on a chosen course: copy the file into
-// that course's backup area, then redirect straight to Moodle's restore wizard on
-// it. Saves the user opening the file picker on the restore screen and re-picking
-// the just-uploaded backup, which can take a long time to render for large stores.
+// Restore a completed .mbz upload directly: either copy the file into a chosen
+// course's backup area, ready for Moodle's restore wizard, or restore it unattended
+// into a new course in a chosen category. Both run as background transfers, since a
+// multi-gigabyte backup cannot be copied or restored within a web request. Saves the
+// user opening the file picker on the restore screen and re-picking the upload.
 if ($action === 'restorecompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
@@ -279,6 +280,34 @@ if ($action === 'restorecompleted') {
         redirect($baseurl);
     }
     if ($data = $form->get_data()) {
+        // Both kinds of restore run in the background (see below), so never queue
+        // a second one for the same upload while one is still waiting or running.
+        if (in_array((string) $record->id, transfer_manager::active_restore_tokens(), true)) {
+            redirect($baseurl, get_string('restorealreadyqueued', 'repository_largefile'));
+        }
+        if (($data->mode ?? '') === completed_restore_form::MODE_AUTO) {
+            // Restore unattended into a new course. The form validated the category
+            // against the operator's rights; the runner re-checks them when it runs.
+            $categoryid = (int) $data->categoryid;
+            transfer_manager::create(
+                transfer_manager::TYPE_AUTORESTORE,
+                (int) $USER->id,
+                [
+                    'token' => (string) $record->id,
+                    'categoryid' => $categoryid,
+                    'filesize' => (int) $record->length,
+                ],
+                0,
+                \context_coursecat::instance($categoryid)->id,
+                (string) $record->filename
+            );
+            redirect(
+                $baseurl,
+                get_string('restoreautoqueued', 'repository_largefile', format_string((string) $record->filename)),
+                null,
+                \core\output\notification::NOTIFY_SUCCESS
+            );
+        }
         $courseid = (int) ($data->courseid ?? 0);
         $coursecontext = \context_course::instance($courseid, IGNORE_MISSING);
         // Both caps re-checked here so a background course change or a spoofed
@@ -296,93 +325,30 @@ if ($action === 'restorecompleted') {
                 \core\output\notification::NOTIFY_ERROR
             );
         }
-        // Take the per-token lock while the file is copied out of the chunk area,
-        // for the same reason as sendcompleted: a concurrent Remove or Send would
-        // otherwise race on the source path. The redirect that drives the restore
-        // wizard is deferred until after the lock is released.
-        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
-        $lock = $lockfactory->get_lock($record->id, 10);
-        if (!$lock) {
-            redirect(
-                $baseurl,
-                get_string('uploadremovefailed', 'repository_largefile'),
-                null,
-                \core\output\notification::NOTIFY_ERROR
-            );
-        }
-        $redirecturl = null;
-        $notice = null;
-        $noticetype = null;
-        try {
-            $fresh = chunk_store::get_record($record->id);
-            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
-                $redirecturl = $baseurl;
-                $notice = get_string('completeduploadgone', 'repository_largefile');
-            } else {
-                $srcpath = chunk_store::get_path_for_id($fresh->id);
-                if (!$srcpath || !file_exists($srcpath)) {
-                    $redirecturl = $baseurl;
-                    $notice = get_string('completeduploadnofile', 'repository_largefile');
-                } else {
-                    // See the sendcompleted handler above: hashing and copying a
-                    // multi-gigabyte file into the file pool must not run under
-                    // the default web-request time limit or hold the session lock.
-                    \core\session\manager::write_close();
-                    \core_php_time_limit::raise();
-                    try {
-                        // Authorize the write as the acting operator (see the
-                        // sendcompleted handler for the rationale); the caps
-                        // above already re-checked the operator's rights on
-                        // this course, and store_imported_file() then re-checks
-                        // them against the same user.
-                        $stored = import_policy::store_imported_file(
-                            (int) $USER->id,
-                            $srcpath,
-                            (string) $fresh->filename,
-                            import_policy::DEST_COURSEBACKUP,
-                            (int) $fresh->contextid,
-                            $courseid
-                        );
-                        chunk_store::delete((string) $fresh->id);
-                        // Drive the restore wizard directly on the file just placed
-                        // in the course backup area. pathnamehash+contenthash pin
-                        // the file so restore.php has no more decisions to prompt
-                        // for; the user lands on the first restore step.
-                        $fs = get_file_storage();
-                        $file = $fs->get_file($coursecontext->id, 'backup', 'course', 0, '/', $stored);
-                        if ($file) {
-                            $redirecturl = new moodle_url('/backup/restore.php', [
-                                'contextid' => $coursecontext->id,
-                                'pathnamehash' => $file->get_pathnamehash(),
-                                'contenthash' => $file->get_contenthash(),
-                            ]);
-                        } else {
-                            $redirecturl = new moodle_url(
-                                '/backup/restorefile.php',
-                                ['contextid' => $coursecontext->id]
-                            );
-                            $notice = get_string(
-                                'sendcompletedsuccess',
-                                'repository_largefile',
-                                (object) [
-                                    'file' => $stored,
-                                    'destination' => import_policy::destination_label(
-                                        import_policy::DEST_COURSEBACKUP
-                                    ),
-                                ]
-                            );
-                        }
-                    } catch (\moodle_exception $e) {
-                        $redirecturl = $baseurl;
-                        $notice = $e->getMessage();
-                        $noticetype = \core\output\notification::NOTIFY_ERROR;
-                    }
-                }
-            }
-        } finally {
-            $lock->release();
-        }
-        redirect($redirecturl, $notice, null, $noticetype);
+        // Copying a multi-gigabyte backup into the course backup area (hashing it
+        // into the file pool) takes minutes — far longer than a web request lives
+        // behind a proxy, which answers with a gateway timeout. So queue the copy
+        // as a background transfer: the runner re-checks these rights, copies the
+        // file under cron, then notifies the operator with a link straight into
+        // the restore wizard (also shown on this page's transfer queue).
+        transfer_manager::create(
+            transfer_manager::TYPE_RESTORE,
+            (int) $USER->id,
+            [
+                'token' => (string) $record->id,
+                'courseid' => $courseid,
+                'filesize' => (int) $record->length,
+            ],
+            0,
+            $coursecontext->id,
+            (string) $record->filename
+        );
+        redirect(
+            $baseurl,
+            get_string('restorequeued', 'repository_largefile', format_string((string) $record->filename)),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
     }
     echo $OUTPUT->header();
     echo manage_page::tabs('transfers');
@@ -539,6 +505,8 @@ if ($transfers) {
         transfer_manager::TYPE_URL => get_string('transfertypeurl', 'repository_largefile'),
         transfer_manager::TYPE_SHARE => get_string('transfertypeshare', 'repository_largefile'),
         transfer_manager::TYPE_PUBLISH => get_string('transfertypepublish', 'repository_largefile'),
+        transfer_manager::TYPE_RESTORE => get_string('transfertyperestore', 'repository_largefile'),
+        transfer_manager::TYPE_AUTORESTORE => get_string('transfertypeautorestore', 'repository_largefile'),
     ];
     $table = new html_table();
     $table->head = [
@@ -559,14 +527,37 @@ if ($transfers) {
             ? get_string('transferwhennow', 'repository_largefile')
             : userdate((int) $transfer->scheduledtime);
         if ($transfer->status === transfer_manager::STATUS_COMPLETED) {
-            $outcome = s((string) $transfer->result);
+            if ($transfer->type === transfer_manager::TYPE_AUTORESTORE) {
+                // The result is the restored course's id: link to the course itself.
+                $course = $DB->get_record('course', ['id' => (int) $transfer->result], 'id, fullname', IGNORE_MISSING);
+                $outcome = $course
+                    ? html_writer::link(
+                        new moodle_url('/course/view.php', ['id' => $course->id]),
+                        format_string($course->fullname)
+                    )
+                    : s((string) $transfer->result);
+            } else {
+                $outcome = s((string) $transfer->result);
+            }
+            // A prepared restore links straight into the restore wizard on the file.
+            $restoreurl = $transfer->type === transfer_manager::TYPE_RESTORE
+                ? \repository_largefile\local\transfer_runner::restore_url($transfer)
+                : null;
+            if ($restoreurl) {
+                $outcome .= ' · ' . html_writer::link($restoreurl, get_string('restorecontinue', 'repository_largefile'));
+            }
         } else if ($transfer->status === transfer_manager::STATUS_FAILED) {
             $outcome = html_writer::tag('span', s((string) $transfer->error), ['class' => 'text-danger']);
         } else if ($transfer->status === transfer_manager::STATUS_RUNNING) {
             // Only the publish runner reports progress: show its percent, throughput
-            // and ETA. For the import types show elapsed time alone (no 0%).
+            // and ETA. For the import types show elapsed time alone (no 0%); a restore
+            // is one long copy into the file store, so say that is what is happening.
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 $outcome = manage_page::running_progress($transfer);
+            } else if (\repository_largefile\local\transfer_runner::is_restore($transfer) && $transfer->timestarted) {
+                $stepkey = $transfer->type === transfer_manager::TYPE_RESTORE ? 'restorecopying' : 'restorerunning';
+                $outcome = get_string($stepkey, 'repository_largefile') . ' · '
+                    . get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted));
             } else {
                 $outcome = $transfer->timestarted
                     ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted))

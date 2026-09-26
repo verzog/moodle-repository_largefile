@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Restore-a-completed-upload form: pick the target course to restore the backup into.
+ * Restore-a-completed-upload form: pick an existing course, or a category for a new one.
  *
  * @package    repository_largefile
  * @copyright  2026 Vernon Spain
@@ -30,16 +30,23 @@ require_once($GLOBALS['CFG']->libdir . '/formslib.php');
 
 /**
  * Restore a completed chunked upload straight into a course, without the user
- * having to reopen the file picker on the course restore screen. The file is
- * copied into the target course's backup area and Moodle's restore wizard is
- * then loaded on it directly. The course picker is limited to courses the user
- * may both upload a backup into and start a restore in.
+ * having to reopen the file picker on the course restore screen. Either the file
+ * is copied (in the background) into an existing course's backup area, ready for
+ * Moodle's restore wizard, or it is restored unattended into a new course in a
+ * chosen category. The pickers only offer courses and categories the user may
+ * restore into.
  *
  * @package    repository_largefile
  * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class completed_restore_form extends \moodleform {
+    /** @var string Copy into an existing course's backup area, then open the restore wizard. */
+    public const MODE_WIZARD = 'wizard';
+
+    /** @var string Restore unattended into a new course in a chosen category. */
+    public const MODE_AUTO = 'auto';
+
     /**
      * Define the form.
      *
@@ -62,6 +69,30 @@ class completed_restore_form extends \moodleform {
             format_string((string) ($this->_customdata['filename'] ?? ''))
         );
 
+        // Two ways to restore: prepare the file in an existing course and open the
+        // restore wizard on it (the operator then picks settings), or restore it
+        // unattended into a brand-new course with the site's default settings.
+        $modes = [
+            $mform->createElement(
+                'radio',
+                'mode',
+                '',
+                get_string('restoremodewizard', 'repository_largefile'),
+                self::MODE_WIZARD
+            ),
+            $mform->createElement(
+                'radio',
+                'mode',
+                '',
+                get_string('restoremodeauto', 'repository_largefile'),
+                self::MODE_AUTO
+            ),
+        ];
+        $mform->addGroup($modes, 'modegroup', get_string('restoremode', 'repository_largefile'), '<br>', false);
+        $mform->setType('mode', PARAM_ALPHA);
+        $mform->setDefault('mode', self::MODE_WIZARD);
+        $mform->addHelpButton('modegroup', 'restoremode', 'repository_largefile');
+
         // A restore drives both upload and restore, so limit the course picker to
         // courses where the user holds both — offering a course they could not
         // finish the restore in would surface the failure only after the file was
@@ -74,12 +105,45 @@ class completed_restore_form extends \moodleform {
             $courseopts
         );
         $mform->addHelpButton('courseid', 'restorecompletedcourse', 'repository_largefile');
+        $mform->hideIf('courseid', 'mode', 'neq', self::MODE_WIZARD);
+
+        // Only categories the operator may both create a course in and restore
+        // into; the site's default category is preselected when it qualifies.
+        $categories = self::auto_restore_categories();
+        $mform->addElement(
+            'select',
+            'categoryid',
+            get_string('restoreautocategory', 'repository_largefile'),
+            $categories
+        );
+        $mform->setType('categoryid', PARAM_INT);
+        $default = \core_course_category::get_default();
+        if ($default && isset($categories[$default->id])) {
+            $mform->setDefault('categoryid', $default->id);
+        }
+        $mform->addHelpButton('categoryid', 'restoreautocategory', 'repository_largefile');
+        $mform->hideIf('categoryid', 'mode', 'neq', self::MODE_AUTO);
 
         $this->add_action_buttons(true, get_string('restorecompletedbutton', 'repository_largefile'));
     }
 
     /**
-     * Require a target course.
+     * Categories the current user may restore a backup into as a new course.
+     *
+     * @return array Category id => display name.
+     */
+    public static function auto_restore_categories(): array {
+        $categories = [];
+        foreach (\core_course_category::make_categories_list('moodle/course:create') as $id => $name) {
+            if (has_capability('moodle/restore:restorecourse', \context_coursecat::instance($id))) {
+                $categories[$id] = $name;
+            }
+        }
+        return $categories;
+    }
+
+    /**
+     * Require a target course (wizard mode) or category (automatic mode).
      *
      * @param array $data Submitted data.
      * @param array $files Submitted files.
@@ -87,7 +151,11 @@ class completed_restore_form extends \moodleform {
      */
     public function validation($data, $files) {
         $errors = parent::validation($data, $files);
-        if (empty($data['courseid'])) {
+        if (($data['mode'] ?? '') === self::MODE_AUTO) {
+            if (empty($data['categoryid']) || !isset(self::auto_restore_categories()[$data['categoryid']])) {
+                $errors['categoryid'] = get_string('errornocategorychosen', 'repository_largefile');
+            }
+        } else if (empty($data['courseid'])) {
             $errors['courseid'] = get_string('errornocoursechosen', 'repository_largefile');
         }
         return $errors;
