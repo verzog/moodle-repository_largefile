@@ -83,7 +83,54 @@ if ($peers) {
         // Resolve the chosen source by reference and re-check the user is entitled to
         // it — nothing large is copied here; the background job reads it directly and
         // encrypts it, immune to the web request timeout a large backup would hit.
-        $source = backup_source::resolve((string) $data->sharesource, (int) $USER->id);
+        // A staged upload is resolved and the publication queued under the upload's
+        // lock — the one Restore… and Send to… queue their jobs under — so a
+        // publication can never be queued behind a job that consumes the upload.
+        $lock = null;
+        if (preg_match('/^token:([A-Za-z0-9]+)$/', (string) $data->sharesource, $m)) {
+            $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+            $lock = $lockfactory->get_lock($m[1], 10);
+            if (!$lock) {
+                redirect(
+                    $baseurl,
+                    get_string('errorrestorebusy', 'repository_largefile'),
+                    null,
+                    \core\output\notification::NOTIFY_ERROR
+                );
+            }
+        }
+        try {
+            $source = backup_source::resolve((string) $data->sharesource, (int) $USER->id);
+            if ($source !== null) {
+                $payload = [
+                    'peerid' => (int) $data->peerid,
+                    // Store the requested duration, not an absolute time: the runner
+                    // starts the expiry when the share is actually created.
+                    'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
+                    'maxdownloads' => max(0, (int) $data->maxdownloads),
+                    // Recorded so the running-progress readout can show throughput/ETA.
+                    'filesize' => (int) $source['filesize'],
+                    'sourcetype' => $source['type'],
+                ];
+                if ($source['type'] === backup_source::TYPE_TOKEN) {
+                    $payload['token'] = $source['token'];
+                } else {
+                    $payload['fileid'] = (int) $source['fileid'];
+                }
+                transfer_manager::create(
+                    transfer_manager::TYPE_PUBLISH,
+                    (int) $USER->id,
+                    $payload,
+                    0,
+                    $context->id,
+                    (string) $source['filename']
+                );
+            }
+        } finally {
+            if ($lock) {
+                $lock->release();
+            }
+        }
         if ($source === null) {
             redirect(
                 $baseurl,
@@ -92,29 +139,6 @@ if ($peers) {
                 \core\output\notification::NOTIFY_ERROR
             );
         }
-        $payload = [
-            'peerid' => (int) $data->peerid,
-            // Store the requested duration, not an absolute time: the runner starts
-            // the expiry when the share is actually created.
-            'expiryduration' => empty($data->expiry) ? 0 : (int) $data->expiry,
-            'maxdownloads' => max(0, (int) $data->maxdownloads),
-            // Recorded so the running-progress readout can show throughput/ETA.
-            'filesize' => (int) $source['filesize'],
-            'sourcetype' => $source['type'],
-        ];
-        if ($source['type'] === backup_source::TYPE_TOKEN) {
-            $payload['token'] = $source['token'];
-        } else {
-            $payload['fileid'] = (int) $source['fileid'];
-        }
-        transfer_manager::create(
-            transfer_manager::TYPE_PUBLISH,
-            (int) $USER->id,
-            $payload,
-            0,
-            $context->id,
-            (string) $source['filename']
-        );
         redirect($baseurl, get_string('sharequeued', 'repository_largefile'));
     }
 }

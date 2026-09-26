@@ -66,6 +66,8 @@ class transfer_runner {
                 $result = self::run_restore_prep($transfer, $payload);
             } else if ($transfer->type === transfer_manager::TYPE_AUTORESTORE) {
                 $result = self::run_auto_restore($transfer, $payload);
+            } else if ($transfer->type === transfer_manager::TYPE_SEND) {
+                $result = self::run_send($transfer, $payload);
             } else {
                 throw new \moodle_exception('errortransferunknown', 'repository_largefile');
             }
@@ -73,16 +75,16 @@ class transfer_runner {
             \repository_largefile\event\transfer_completed::for_transfer($transfer, $result)->trigger();
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 self::notify_publish((int) $transfer->userid, (string) $transfer->filename, $result, null);
-            } else if (self::is_restore($transfer)) {
+            } else if (self::is_consumer($transfer)) {
                 $transfer->result = $result;
-                self::notify_restore($transfer, null);
+                self::notify_consumer($transfer, null);
             }
         } catch (\Throwable $e) {
             transfer_manager::mark_failed((int) $transfer->id, $e->getMessage());
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 self::notify_publish((int) $transfer->userid, (string) $transfer->filename, null, $e->getMessage());
-            } else if (self::is_restore($transfer)) {
-                self::notify_restore($transfer, $e->getMessage());
+            } else if (self::is_consumer($transfer)) {
+                self::notify_consumer($transfer, $e->getMessage());
             }
         }
     }
@@ -115,15 +117,52 @@ class transfer_runner {
     }
 
     /**
-     * Notify the operator of a restore that was failed outside {@see self::run()}
-     * (e.g. by {@see transfer_manager::reclaim_stale()}), so they are not left
-     * waiting for a restore link that will never come.
+     * Whether a transfer consumes a completed upload (a restore of either kind, or
+     * a send), which notifies its operator when it finishes.
      *
-     * @param \stdClass $transfer The failed restore transfer row (with its error set).
+     * @param \stdClass $transfer A transfer row.
+     * @return bool True for a prepared or automatic restore, or a send.
+     */
+    public static function is_consumer(\stdClass $transfer): bool {
+        return in_array($transfer->type, transfer_manager::CONSUMER_TYPES, true);
+    }
+
+    /**
+     * Notify the operator of a restore or send that was failed outside
+     * {@see self::run()} (e.g. by {@see transfer_manager::reclaim_stale()}), so they
+     * are not left waiting for a link that will never come.
+     *
+     * @param \stdClass $transfer The failed transfer row (with its error set).
      * @return void
      */
-    public static function notify_restore_failure(\stdClass $transfer): void {
-        self::notify_restore($transfer, (string) ($transfer->error ?? ''));
+    public static function notify_consumer_failure(\stdClass $transfer): void {
+        self::notify_consumer($transfer, (string) ($transfer->error ?? ''));
+    }
+
+    /**
+     * Where a completed send's file can be found, for a given viewer: a course's
+     * restore screen for the course backup area, or the private files page for
+     * private files — but only for the operator the file was sent for, since that
+     * page shows the *viewer's* own files. The user backup area has no page of its
+     * own (it is listed on every course's restore screen), so it has no link.
+     *
+     * @param \stdClass $transfer A send transfer row.
+     * @param int $viewerid The user the link is for.
+     * @return \moodle_url|null The URL, or null when there is nothing the viewer can open.
+     */
+    public static function send_url(\stdClass $transfer, int $viewerid): ?\moodle_url {
+        $payload = transfer_manager::payload($transfer);
+        $destination = (string) ($payload['destination'] ?? '');
+        if ($destination === import_policy::DEST_COURSEBACKUP) {
+            $courseid = (int) ($payload['courseid'] ?? 0);
+            $coursecontext = $courseid > 0 ? \context_course::instance($courseid, IGNORE_MISSING) : null;
+            if ($coursecontext) {
+                return new \moodle_url('/backup/restorefile.php', ['contextid' => $coursecontext->id]);
+            }
+        } else if ($destination === import_policy::DEST_PRIVATEFILES && $viewerid === (int) $transfer->userid) {
+            return new \moodle_url('/user/files.php');
+        }
+        return null;
     }
 
     /**
@@ -156,23 +195,27 @@ class transfer_runner {
     }
 
     /**
-     * Tell the operator a queued restore is ready — with a link straight into the
-     * restore wizard — or that it failed. A messaging failure is swallowed: the
+     * Tell the operator a queued restore or send has finished — with a link straight
+     * into the restore wizard, to the new course, or to where the sent file landed —
+     * or that it failed. A messaging failure is swallowed: the
      * outcome is already recorded on the transfer row, so it must not fail the job.
      *
-     * @param \stdClass $transfer The restore transfer row (with result set on success).
+     * @param \stdClass $transfer The restore or send transfer row (with result set on success).
      * @param string|null $error The failure message, or null on success.
      * @return void
      */
-    private static function notify_restore(\stdClass $transfer, ?string $error): void {
+    private static function notify_consumer(\stdClass $transfer, ?string $error): void {
         $user = \core_user::get_user((int) $transfer->userid);
         if (!$user) {
             return;
         }
         $name = (string) ($transfer->filename ?? '') !== '' ? (string) $transfer->filename : '-';
         $auto = $transfer->type === transfer_manager::TYPE_AUTORESTORE;
+        $send = $transfer->type === transfer_manager::TYPE_SEND;
         $url = null;
-        if ($error === null) {
+        if ($error === null && $send) {
+            $url = self::send_url($transfer, (int) $transfer->userid);
+        } else if ($error === null) {
             // An automatic restore's result is the new course's id; a prepared one's
             // is the backup file waiting for the restore wizard.
             $url = $auto
@@ -183,13 +226,22 @@ class transfer_runner {
 
         $message = new \core\message\message();
         $message->component = 'repository_largefile';
-        $message->name = 'restoreready';
+        $message->name = $send ? 'uploadsent' : 'restoreready';
         $message->userfrom = \core_user::get_noreply_user();
         $message->userto = $user;
         $message->notification = 1;
         $message->courseid = SITEID;
         $message->contexturl = $url->out(false);
-        if ($error === null && $auto) {
+        if ($error === null && $send) {
+            $destination = (string) (transfer_manager::payload($transfer)['destination'] ?? '');
+            $a = (object) [
+                'file' => (string) $transfer->result,
+                'destination' => import_policy::destination_label($destination),
+            ];
+            $message->contexturlname = get_string('sendopendestination', 'repository_largefile');
+            $message->subject = get_string('notifysentsubject', 'repository_largefile', $name);
+            $body = get_string('notifysentbody', 'repository_largefile', $a) . "\n\n" . $url->out(false);
+        } else if ($error === null && $auto) {
             $message->contexturlname = get_string('restoreviewcourse', 'repository_largefile');
             $message->subject = get_string('notifyrestoredsubject', 'repository_largefile', $name);
             $body = get_string('notifyrestoredbody', 'repository_largefile', $name) . "\n\n" . $url->out(false);
@@ -199,9 +251,13 @@ class transfer_runner {
             $body = get_string('notifyrestorereadybody', 'repository_largefile', $name) . "\n\n" . $url->out(false);
         } else {
             $message->contexturlname = get_string('transfers', 'repository_largefile');
-            $message->subject = get_string('notifyrestorefailedsubject', 'repository_largefile', $name);
+            $message->subject = get_string(
+                $send ? 'notifysendfailedsubject' : 'notifyrestorefailedsubject',
+                'repository_largefile',
+                $name
+            );
             $body = get_string(
-                'notifyrestorefailedbody',
+                $send ? 'notifysendfailedbody' : 'notifyrestorefailedbody',
                 'repository_largefile',
                 (object) ['filename' => $name, 'error' => $error]
             );
@@ -215,7 +271,7 @@ class transfer_runner {
             message_send($message);
         } catch (\Throwable $e) {
             debugging(
-                'repository_largefile: restore notification could not be sent: ' . $e->getMessage(),
+                'repository_largefile: restore/send notification could not be sent: ' . $e->getMessage(),
                 DEBUG_DEVELOPER
             );
         }
@@ -548,19 +604,164 @@ class transfer_runner {
                 import_policy::type_label(import_policy::TYPE_BACKUP)
             );
         }
-        $fs = get_file_storage();
+        return self::copy_upload_to_area(
+            $transfer,
+            $payload,
+            $coursecontext->id,
+            'backup',
+            'course',
+            import_policy::TYPE_BACKUP
+        );
+    }
 
-        // Hold the same per-token lock the Transfers page actions (Send to…, Remove)
-        // take, so none of them can move or delete the source while it is copied.
+    /**
+     * Send a completed chunked upload to the destination chosen with "Send to…":
+     * the operator's private backup area, a course's backup area, or the operator's
+     * private files.
+     *
+     * The file lands in the operator's destination, not the upload's original
+     * owner's: a manager who may route someone else's completed upload does so into
+     * their own areas (or the course they picked). As the job runs unattended, the
+     * site policy and the operator's rights are re-checked now.
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param array $payload Decoded payload; expects 'token', 'destination' and,
+     *        for the course backup area, 'courseid'.
+     * @return string The stored file name.
+     * @throws \moodle_exception If the destination is not allowed, the operator
+     *         lacks the rights, or the upload is gone.
+     */
+    private static function run_send(\stdClass $transfer, array $payload): string {
+        $userid = (int) $transfer->userid;
+        if (!has_capability('repository/largefile:import', \context_system::instance(), $userid)) {
+            throw new \moodle_exception('nopermissions', 'error', '', 'repository/largefile:import');
+        }
+        $type = import_policy::detect_type((string) $transfer->filename);
+        if (!import_policy::is_type_accepted($type)) {
+            throw new \moodle_exception('errortypenotaccepted', 'repository_largefile', '', import_policy::type_label($type));
+        }
+        $destination = (string) ($payload['destination'] ?? '');
+        if ($destination === import_policy::DEST_PICKER || !import_policy::is_destination_allowed($type, $destination)) {
+            throw new \moodle_exception('errordestnotallowed', 'repository_largefile', '', import_policy::type_label($type));
+        }
+        if ($destination === import_policy::DEST_COURSEBACKUP) {
+            $courseid = (int) ($payload['courseid'] ?? 0);
+            if ($courseid <= 0) {
+                throw new \moodle_exception('errornocoursechosen', 'repository_largefile');
+            }
+            if (!import_policy::can_use_course_backup($userid, $courseid)) {
+                throw new \moodle_exception('errornocoursebackupcap', 'repository_largefile');
+            }
+            return self::copy_upload_to_area(
+                $transfer,
+                $payload,
+                \context_course::instance($courseid)->id,
+                'backup',
+                'course'
+            );
+        }
+        $filearea = $destination === import_policy::DEST_BACKUPAREA ? 'backup' : 'private';
+        return self::copy_upload_to_area(
+            $transfer,
+            $payload,
+            \context_user::instance($userid)->id,
+            'user',
+            $filearea
+        );
+    }
+
+    /**
+     * The copy an earlier, interrupted attempt of this transfer already stored, if
+     * any — and only if it really is that copy, not an unrelated file that took the
+     * same name while the job waited to be retried.
+     *
+     * Either the stored file's id was checkpointed after the copy (the reliable
+     * case), or only the target name was, when the attempt died between storing
+     * the file and recording its id. The source is only removed after the id is
+     * recorded, so in that second case it is still there, and a file of that name
+     * counts as ours only when its content hash matches the source's. Hashing the
+     * source is slow for a large file, but it only happens on this rare path.
+     *
+     * @param array $payload Decoded payload; may hold 'storedfileid', 'storedname' and 'token'.
+     * @param int $contextid Target context id.
+     * @param string $component Target component.
+     * @param string $filearea Target file area.
+     * @return string|null The stored file name, or null when there is no such copy.
+     */
+    private static function find_checkpointed_copy(
+        array $payload,
+        int $contextid,
+        string $component,
+        string $filearea
+    ): ?string {
+        $fs = get_file_storage();
+        $fileid = (int) ($payload['storedfileid'] ?? 0);
+        if ($fileid > 0) {
+            $file = $fs->get_file_by_id($fileid);
+            if (
+                $file
+                    && (int) $file->get_contextid() === $contextid
+                    && $file->get_component() === $component
+                    && $file->get_filearea() === $filearea
+            ) {
+                return $file->get_filename();
+            }
+        }
+        $name = (string) ($payload['storedname'] ?? '');
+        if ($name === '') {
+            return null;
+        }
+        $file = $fs->get_file($contextid, $component, $filearea, 0, '/', $name);
+        $srcpath = \repository_largefile\chunk_store::get_path_for_id((string) ($payload['token'] ?? ''));
+        if (!$file || !$srcpath || !is_file($srcpath) || (int) $file->get_filesize() !== (int) filesize($srcpath)) {
+            return null;
+        }
+        return sha1_file($srcpath) === $file->get_contenthash() ? $name : null;
+    }
+
+    /**
+     * Copy a completed chunked upload into a file area and remove the upload.
+     *
+     * Hashing and copying a multi-gigabyte file into the file pool takes minutes,
+     * which is why this runs under cron rather than in a web request. It holds the
+     * same per-token lock the Transfers page actions take, so none of them can move
+     * or delete the source mid-copy.
+     *
+     * Restart-safe: the target file name is checkpointed on the transfer (as
+     * 'storedname') before the copy, and the stored file's id (as 'storedfileid')
+     * after it, before the source is removed. A retry after an interrupted attempt
+     * that finds its own copy already stored ({@see self::find_checkpointed_copy()})
+     * just finishes the clean-up, rather than copying again or failing on the
+     * consumed upload.
+     *
+     * @param \stdClass $transfer The transfer row (its file name is set from the upload).
+     * @param array $payload Decoded payload; expects 'token', may hold 'storedname'.
+     * @param int $contextid Target context id.
+     * @param string $component Target component.
+     * @param string $filearea Target file area.
+     * @param string|null $requiredtype A kind (import_policy::TYPE_*) the upload must be, or null.
+     * @return string The stored file name (prefixed with a timestamp on a clash).
+     * @throws \moodle_exception If the upload is gone, busy or of the wrong kind.
+     */
+    private static function copy_upload_to_area(
+        \stdClass $transfer,
+        array $payload,
+        int $contextid,
+        string $component,
+        string $filearea,
+        ?string $requiredtype = null
+    ): string {
+        $token = (string) ($payload['token'] ?? '');
+        $fs = get_file_storage();
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
         if (!$lock) {
             throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
         }
         try {
-            // An earlier, interrupted attempt already stored the copy: finish up.
-            $done = (string) ($payload['storedname'] ?? '');
-            if ($done !== '' && $fs->file_exists($coursecontext->id, 'backup', 'course', 0, '/', $done)) {
+            // An earlier, interrupted attempt may already have stored the copy.
+            $done = self::find_checkpointed_copy($payload, $contextid, $component, $filearea);
+            if ($done !== null) {
                 if (\repository_largefile\chunk_store::get_record($token)) {
                     \repository_largefile\chunk_store::delete($token);
                 }
@@ -575,25 +776,28 @@ class transfer_runner {
             if (!$srcpath || !is_file($srcpath)) {
                 throw new \moodle_exception('completeduploadnofile', 'repository_largefile');
             }
-            if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
+            if ($requiredtype !== null && import_policy::detect_type((string) $record->filename) !== $requiredtype) {
                 throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
             }
             transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
 
             $filename = (string) $record->filename;
-            if ($fs->file_exists($coursecontext->id, 'backup', 'course', 0, '/', $filename)) {
+            if ($fs->file_exists($contextid, $component, $filearea, 0, '/', $filename)) {
                 $filename = time() . '-' . $filename;
             }
             transfer_manager::set_payload_value((int) $transfer->id, 'storedname', $filename);
-            $fs->create_file_from_pathname([
-                'contextid' => $coursecontext->id,
-                'component' => 'backup',
-                'filearea' => 'course',
+            $stored = $fs->create_file_from_pathname([
+                'contextid' => $contextid,
+                'component' => $component,
+                'filearea' => $filearea,
                 'itemid' => 0,
                 'filepath' => '/',
                 'filename' => $filename,
-                'userid' => $userid,
+                'userid' => (int) $transfer->userid,
             ], $srcpath);
+            // Record which file is ours before the source goes, so a retry can tell
+            // it from an unrelated file that later took the same name.
+            transfer_manager::set_payload_value((int) $transfer->id, 'storedfileid', (int) $stored->get_id());
             // Remove the row and its file via chunk_store::delete(), which keeps the
             // row for the cleanup task if the bytes cannot be removed.
             \repository_largefile\chunk_store::delete((string) $record->id);

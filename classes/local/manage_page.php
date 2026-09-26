@@ -286,9 +286,9 @@ class manage_page {
             }
         }
         $users = $userids ? $DB->get_records_list('user', 'id', array_keys($userids)) : [];
-        // Uploads a queued or running restore is working on: their actions would race
-        // the background job, so the row just says a restore is in hand.
-        $restoring = array_flip(transfer_manager::active_restore_tokens());
+        // Uploads a queued or running job still needs (a restore, send or share
+        // publication): their actions would race it, so the row just says so.
+        $queued = array_flip(transfer_manager::active_source_tokens());
         // Restore… is offered when either restore route is available to this user
         // (copy into a course's backup area, or restore automatically into a new
         // course); worked out once here, not per row.
@@ -303,13 +303,13 @@ class manage_page {
         ];
         foreach ($completed as $row) {
             $user = $row->userid && isset($users[$row->userid]) ? $users[$row->userid] : null;
-            if (isset($restoring[(string) $row->id])) {
+            if (isset($queued[(string) $row->id])) {
                 $table->data[] = [
                     $user ? fullname($user) : '—',
                     format_string((string) $row->filename),
                     display_size((int) $row->length),
                     userdate((int) $row->lastmodified),
-                    get_string('restoreinprogress', 'repository_largefile'),
+                    get_string('uploadjobqueued', 'repository_largefile'),
                 ];
                 continue;
             }

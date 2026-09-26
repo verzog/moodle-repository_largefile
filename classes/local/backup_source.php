@@ -100,6 +100,11 @@ class backup_source {
             if (!$record || (int) $record->userid !== $userid || !chunk_store::is_complete($id)) {
                 return null;
             }
+            // A restore or send queued for this upload will consume it, so a share
+            // publication queued behind it would find nothing to publish.
+            if (in_array($id, transfer_manager::active_consumer_tokens(), true)) {
+                return null;
+            }
             return [
                 'type' => self::TYPE_TOKEN,
                 'token' => $id,
@@ -177,9 +182,11 @@ class backup_source {
      */
     private static function staged_uploads(int $userid): array {
         $options = [];
+        // Not uploads a queued restore or send is about to consume (see resolve()).
+        $claimed = array_flip(transfer_manager::active_consumer_tokens());
         foreach (chunk_store::list_completed($userid) as $record) {
             $filename = (string) $record->filename;
-            if ($filename === '') {
+            if ($filename === '' || isset($claimed[(string) $record->id])) {
                 continue;
             }
             $value = self::TYPE_TOKEN . ':' . $record->id;

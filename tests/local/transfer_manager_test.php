@@ -305,29 +305,32 @@ final class transfer_manager_test extends \advanced_testcase {
     }
 
     /**
-     * Restore tokens are reported only while their restore is queued or running,
-     * and publish tokens are never mistaken for restores.
+     * Consumer tokens (restores and sends) are reported only while their job is
+     * queued or running, and publish tokens are never mistaken for them.
      *
      * @return void
      */
-    public function test_active_restore_tokens(): void {
+    public function test_active_consumer_tokens(): void {
         $this->resetAfterTest(true);
         $prep = transfer_manager::create(transfer_manager::TYPE_RESTORE, 1, ['token' => 'aaa', 'courseid' => 2]);
         transfer_manager::create(transfer_manager::TYPE_AUTORESTORE, 1, ['token' => 'bbb', 'categoryid' => 1]);
+        transfer_manager::create(transfer_manager::TYPE_SEND, 1, ['token' => 'ddd', 'destination' => 'privatefiles']);
         transfer_manager::create(
             transfer_manager::TYPE_PUBLISH,
             1,
             ['peerid' => 1, 'sourcetype' => backup_source::TYPE_TOKEN, 'token' => 'ccc']
         );
 
-        $restoring = transfer_manager::active_restore_tokens();
-        sort($restoring);
-        $this->assertSame(['aaa', 'bbb'], $restoring);
+        $consumed = transfer_manager::active_consumer_tokens();
+        sort($consumed);
+        $this->assertSame(['aaa', 'bbb', 'ddd'], $consumed);
         $sources = transfer_manager::active_source_tokens();
         sort($sources);
-        $this->assertSame(['aaa', 'bbb', 'ccc'], $sources);
+        $this->assertSame(['aaa', 'bbb', 'ccc', 'ddd'], $sources);
 
         transfer_manager::cancel($prep);
-        $this->assertSame(['bbb'], transfer_manager::active_restore_tokens());
+        $consumed = transfer_manager::active_consumer_tokens();
+        sort($consumed);
+        $this->assertSame(['bbb', 'ddd'], $consumed);
     }
 }

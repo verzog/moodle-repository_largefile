@@ -126,8 +126,8 @@ if ($action === 'removeallstalled') {
 if ($action === 'sendcompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
-    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_restore_tokens(), true)) {
-        redirect($baseurl, get_string('uploadrestorequeued', 'repository_largefile'));
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_source_tokens(), true)) {
+        redirect($baseurl, get_string('uploadbusyqueued', 'repository_largefile'));
     }
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
@@ -169,82 +169,93 @@ if ($action === 'sendcompleted') {
     }
     if ($data = $form->get_data()) {
         $destination = (string) ($data->destination ?? array_key_first($destinations));
-        $courseid = (int) ($data->courseid ?? 0);
-        // Take the per-token lock the background writer and delete_in_state() also
-        // use, so a concurrent Remove or a repeat Send cannot race on the source
-        // file (one of them would otherwise read a file the other has just moved).
-        // The row is re-checked inside the lock, and the source path is dropped
-        // only after store_imported_file() has consumed the bytes.
+        if (!isset($destinations[$destination])) {
+            redirect(
+                $baseurl,
+                get_string('errordestnotallowed', 'repository_largefile', import_policy::type_label($type)),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        $courseid = 0;
+        $contextid = context_system::instance()->id;
+        if ($destination === import_policy::DEST_COURSEBACKUP) {
+            // Re-checked here (and again by the runner) so a spoofed form cannot
+            // route a file into a course the operator may not add a backup to.
+            $courseid = (int) ($data->courseid ?? 0);
+            if ($courseid <= 0 || !import_policy::can_use_course_backup((int) $USER->id, $courseid)) {
+                redirect(
+                    $baseurl,
+                    get_string('errornocoursebackupcap', 'repository_largefile'),
+                    null,
+                    \core\output\notification::NOTIFY_ERROR
+                );
+            }
+            $contextid = \context_course::instance($courseid)->id;
+        }
+        // Hashing and copying a multi-gigabyte file into the file pool takes
+        // minutes — far longer than a web request lives behind a proxy, which
+        // answers with a gateway timeout. So queue the copy as a background
+        // transfer: the runner re-checks the policy and rights, copies the file
+        // under cron into the operator's destination (not the upload owner's: a
+        // manager may route someone else's upload into their own areas or the
+        // course they picked), then notifies the operator. The upload is re-checked
+        // and the job queued under the upload's lock, so two operators submitting
+        // at once cannot both queue it.
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($record->id, 10);
         if (!$lock) {
             redirect(
                 $baseurl,
-                get_string('uploadremovefailed', 'repository_largefile'),
+                get_string('errorrestorebusy', 'repository_largefile'),
                 null,
                 \core\output\notification::NOTIFY_ERROR
             );
         }
-        $notice = null;
-        $noticetype = null;
         try {
+            // Re-check the upload under its lock: a Remove or cleanup run may have
+            // taken it since the form was shown, and a job that needs it (a restore,
+            // send or share publication) may have been queued meanwhile.
             $fresh = chunk_store::get_record($record->id);
+            $freshpath = $fresh ? chunk_store::get_path_for_id($fresh->id) : null;
+            $blocked = null;
             if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
-                $notice = get_string('completeduploadgone', 'repository_largefile');
-            } else {
-                $srcpath = chunk_store::get_path_for_id($fresh->id);
-                if (!$srcpath || !file_exists($srcpath)) {
-                    $notice = get_string('completeduploadnofile', 'repository_largefile');
-                } else {
-                    // Hashing and copying a multi-gigabyte file into the file pool
-                    // is synchronous and can outlast a 30- or 60-second web
-                    // request. Raise the PHP time limit and close the session so
-                    // the user's session lock is not held for the full copy —
-                    // matching import.php's foreground URL fetch and share.php's
-                    // stream-download path.
-                    \core\session\manager::write_close();
-                    \core_php_time_limit::raise();
-                    try {
-                        // Authorize the write as the acting operator, not the
-                        // upload's original owner: a manager who holds
-                        // moodle/restore:uploadfile on the chosen course must be
-                        // able to route someone else's completed upload there,
-                        // and the file naturally belongs to the operator whose
-                        // destination it lands in (private backup / private
-                        // files under $USER, or the course they picked).
-                        $stored = import_policy::store_imported_file(
-                            (int) $USER->id,
-                            $srcpath,
-                            (string) $fresh->filename,
-                            $destination,
-                            (int) $fresh->contextid,
-                            $courseid
-                        );
-                        // Remove the row via chunk_store::delete(): it re-attempts
-                        // the source unlink store_imported_file()'s @unlink might
-                        // have silently failed, and keeps the row for the cleanup
-                        // task to retry if the file still cannot be removed —
-                        // never dropping the only tracking record while bytes
-                        // remain on disk.
-                        chunk_store::delete((string) $fresh->id);
-                        $notice = get_string(
-                            'sendcompletedsuccess',
-                            'repository_largefile',
-                            (object) [
-                                'file' => $stored,
-                                'destination' => import_policy::destination_label($destination),
-                            ]
-                        );
-                    } catch (\moodle_exception $e) {
-                        $notice = $e->getMessage();
-                        $noticetype = \core\output\notification::NOTIFY_ERROR;
-                    }
-                }
+                $blocked = 'completeduploadgone';
+            } else if (!$freshpath || !file_exists($freshpath)) {
+                $blocked = 'completeduploadnofile';
+            } else if (in_array((string) $record->id, transfer_manager::active_source_tokens(), true)) {
+                $blocked = 'uploadalreadyqueued';
+            }
+            if ($blocked === null) {
+                transfer_manager::create(
+                    transfer_manager::TYPE_SEND,
+                    (int) $USER->id,
+                    [
+                        'token' => (string) $record->id,
+                        'destination' => $destination,
+                        'courseid' => $courseid,
+                        'filesize' => (int) $record->length,
+                    ],
+                    0,
+                    $contextid,
+                    (string) $record->filename
+                );
             }
         } finally {
             $lock->release();
         }
-        redirect($baseurl, $notice, null, $noticetype);
+        if ($blocked !== null) {
+            redirect($baseurl, get_string($blocked, 'repository_largefile'));
+        }
+        redirect(
+            $baseurl,
+            get_string('sendqueued', 'repository_largefile', (object) [
+                'file' => format_string((string) $record->filename),
+                'destination' => import_policy::destination_label($destination),
+            ]),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
     }
     echo $OUTPUT->header();
     echo manage_page::tabs('transfers');
@@ -326,10 +337,10 @@ if ($action === 'restorecompleted') {
         }
         $payload += ['token' => (string) $record->id, 'filesize' => (int) $record->length];
 
-        // Both kinds of restore run in the background, so never queue a second one
-        // for the same upload while one is still waiting or running. The check and
-        // the queueing happen under the upload's lock, so two operators submitting
-        // at once cannot both get through.
+        // Both kinds of restore run in the background, so never queue one for an
+        // upload another job still needs. The upload is re-checked and the job
+        // queued under the upload's lock, so two operators submitting at once cannot
+        // both get through.
         $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
         $lock = $lockfactory->get_lock($record->id, 10);
         if (!$lock) {
@@ -341,15 +352,27 @@ if ($action === 'restorecompleted') {
             );
         }
         try {
-            $alreadyqueued = in_array((string) $record->id, transfer_manager::active_restore_tokens(), true);
-            if (!$alreadyqueued) {
+            // Re-check the upload under its lock: a Remove or cleanup run may have
+            // taken it since the form was shown, and a job that needs it (a restore,
+            // send or share publication) may have been queued meanwhile.
+            $fresh = chunk_store::get_record($record->id);
+            $freshpath = $fresh ? chunk_store::get_path_for_id($fresh->id) : null;
+            $blocked = null;
+            if (!$fresh || (int) $fresh->state !== chunk_store::STATE_COMPLETED) {
+                $blocked = 'completeduploadgone';
+            } else if (!$freshpath || !file_exists($freshpath)) {
+                $blocked = 'completeduploadnofile';
+            } else if (in_array((string) $record->id, transfer_manager::active_source_tokens(), true)) {
+                $blocked = 'uploadalreadyqueued';
+            }
+            if ($blocked === null) {
                 transfer_manager::create($type, (int) $USER->id, $payload, 0, $contextid, (string) $record->filename);
             }
         } finally {
             $lock->release();
         }
-        if ($alreadyqueued) {
-            redirect($baseurl, get_string('restorealreadyqueued', 'repository_largefile'));
+        if ($blocked !== null) {
+            redirect($baseurl, get_string($blocked, 'repository_largefile'));
         }
         redirect(
             $baseurl,
@@ -372,8 +395,8 @@ if ($action === 'restorecompleted') {
 if ($action === 'removecompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
-    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_restore_tokens(), true)) {
-        redirect($baseurl, get_string('uploadrestorequeued', 'repository_largefile'));
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_source_tokens(), true)) {
+        redirect($baseurl, get_string('uploadbusyqueued', 'repository_largefile'));
     }
     $outcome = $uploadid !== ''
         ? \repository_largefile\chunk_store::delete_in_state($uploadid, \repository_largefile\chunk_store::STATE_COMPLETED)
@@ -523,6 +546,7 @@ if ($transfers) {
         transfer_manager::TYPE_PUBLISH => get_string('transfertypepublish', 'repository_largefile'),
         transfer_manager::TYPE_RESTORE => get_string('transfertyperestore', 'repository_largefile'),
         transfer_manager::TYPE_AUTORESTORE => get_string('transfertypeautorestore', 'repository_largefile'),
+        transfer_manager::TYPE_SEND => get_string('transfertypesend', 'repository_largefile'),
     ];
     $table = new html_table();
     $table->head = [
@@ -555,6 +579,14 @@ if ($transfers) {
             } else {
                 $outcome = s((string) $transfer->result);
             }
+            // A completed send links to where the file landed, when the viewer can
+            // open it (another operator's private files cannot be).
+            $sendurl = $transfer->type === transfer_manager::TYPE_SEND
+                ? \repository_largefile\local\transfer_runner::send_url($transfer, (int) $USER->id)
+                : null;
+            if ($sendurl) {
+                $outcome .= ' · ' . html_writer::link($sendurl, get_string('sendopendestination', 'repository_largefile'));
+            }
             // A prepared restore links straight into the restore wizard on the file.
             $restoreurl = $transfer->type === transfer_manager::TYPE_RESTORE
                 ? \repository_largefile\local\transfer_runner::restore_url($transfer)
@@ -570,9 +602,17 @@ if ($transfers) {
             // is one long copy into the file store, so say that is what is happening.
             if ($transfer->type === transfer_manager::TYPE_PUBLISH) {
                 $outcome = manage_page::running_progress($transfer);
-            } else if (\repository_largefile\local\transfer_runner::is_restore($transfer) && $transfer->timestarted) {
-                $stepkey = $transfer->type === transfer_manager::TYPE_RESTORE ? 'restorecopying' : 'restorerunning';
-                $outcome = get_string($stepkey, 'repository_largefile') . ' · '
+            } else if (\repository_largefile\local\transfer_runner::is_consumer($transfer) && $transfer->timestarted) {
+                $steps = [
+                    transfer_manager::TYPE_RESTORE => get_string('restorecopying', 'repository_largefile'),
+                    transfer_manager::TYPE_AUTORESTORE => get_string('restorerunning', 'repository_largefile'),
+                    transfer_manager::TYPE_SEND => get_string(
+                        'sendcopying',
+                        'repository_largefile',
+                        import_policy::destination_label((string) (transfer_manager::payload($transfer)['destination'] ?? ''))
+                    ),
+                ];
+                $outcome = $steps[$transfer->type] . ' · '
                     . get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted));
             } else {
                 $outcome = $transfer->timestarted

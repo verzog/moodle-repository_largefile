@@ -65,6 +65,17 @@ class transfer_manager {
     public const TYPE_AUTORESTORE = 'autorestore';
 
     /**
+     * @var string A copy of a completed chunked upload to a destination chosen with
+     * "Send to…" (private backup area, a course's backup area or private files).
+     * Queued for the same reason as a restore: copying a very large file into the
+     * file pool outlasts any web request.
+     */
+    public const TYPE_SEND = 'sendupload';
+
+    /** @var string[] Transfer types that consume a completed upload when they run. */
+    public const CONSUMER_TYPES = [self::TYPE_RESTORE, self::TYPE_AUTORESTORE, self::TYPE_SEND];
+
+    /**
      * @var string Filearea (at the system context, keyed by transfer id) holding a
      * queued publication's plaintext source until the runner encrypts it. It is
      * plugin-owned rather than a draft file, so Moodle's draft cleanup cannot remove
@@ -453,7 +464,7 @@ class transfer_manager {
             'st'
         );
         [$typesql, $typeparams] = $DB->get_in_or_equal(
-            [self::TYPE_PUBLISH, self::TYPE_RESTORE, self::TYPE_AUTORESTORE],
+            array_merge([self::TYPE_PUBLISH], self::CONSUMER_TYPES),
             SQL_PARAMS_NAMED,
             'ty'
         );
@@ -471,7 +482,7 @@ class transfer_manager {
             if (!is_array($payload) || empty($payload['token'])) {
                 continue;
             }
-            // A publish names a token only for a token-sourced share; a restore always does.
+            // A publish names a token only for a token-sourced share; the others always do.
             if ($row->type !== self::TYPE_PUBLISH || ($payload['sourcetype'] ?? '') === backup_source::TYPE_TOKEN) {
                 $tokens[] = (string) $payload['token'];
             }
@@ -480,12 +491,13 @@ class transfer_manager {
     }
 
     /**
-     * Staged-upload tokens with a restore queued or running, so the Transfers page
-     * can show them as being prepared rather than offering Restore a second time.
+     * Staged-upload tokens with a restore or send queued or running. Such an upload
+     * is spoken for: the Transfers page shows it as queued rather than offering
+     * Restore…, Send to… or Remove, which would race the background job.
      *
      * @return array List of chunk_store token ids (strings).
      */
-    public static function active_restore_tokens(): array {
+    public static function active_consumer_tokens(): array {
         global $DB;
         [$statussql, $params] = $DB->get_in_or_equal(
             [self::STATUS_SCHEDULED, self::STATUS_RUNNING],
@@ -493,7 +505,7 @@ class transfer_manager {
             'st'
         );
         [$typesql, $typeparams] = $DB->get_in_or_equal(
-            [self::TYPE_RESTORE, self::TYPE_AUTORESTORE],
+            self::CONSUMER_TYPES,
             SQL_PARAMS_NAMED,
             'ty'
         );
