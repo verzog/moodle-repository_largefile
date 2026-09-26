@@ -754,4 +754,113 @@ final class transfer_runner_test extends \advanced_testcase {
         $this->setUser($this->getDataGenerator()->create_user());
         $this->assertSame([], \repository_largefile\form\completed_restore_form::available_modes());
     }
+
+    /**
+     * A queued send copies someone else's completed upload into the operator's own
+     * private files, consumes the upload, and notifies the operator.
+     *
+     * @return void
+     */
+    public function test_send_to_private_files(): void {
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $owner = $this->getDataGenerator()->create_user();
+        $token = $this->stage_completed_upload((int) $owner->id, 'notes.pdf', 'PDFDATA');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_SEND,
+            (int) $admin->id,
+            ['token' => $token, 'destination' => import_policy::DEST_PRIVATEFILES, 'courseid' => 0],
+            0,
+            \context_system::instance()->id,
+            'notes.pdf'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $this->assertSame('notes.pdf', $transfer->result);
+        $file = get_file_storage()->get_file(
+            \context_user::instance($admin->id)->id,
+            'user',
+            'private',
+            0,
+            '/',
+            'notes.pdf'
+        );
+        $this->assertNotFalse($file);
+        $this->assertSame('PDFDATA', $file->get_content());
+        $this->assertNull(\repository_largefile\chunk_store::get_record($token));
+        $this->assertCount(1, $messages);
+        $this->assertSame('uploadsent', $messages[0]->eventtype);
+    }
+
+    /**
+     * A queued send to a course's backup area by a user who may not add a backup
+     * there fails and leaves the completed upload untouched.
+     *
+     * @return void
+     */
+    public function test_send_to_course_backup_without_capability_fails(): void {
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $operator = $this->getDataGenerator()->create_user();
+        $course = $this->getDataGenerator()->create_course();
+        $systemcontext = \context_system::instance();
+        $roleid = $this->getDataGenerator()->create_role();
+        assign_capability('repository/largefile:import', CAP_ALLOW, $roleid, $systemcontext->id);
+        role_assign($roleid, $operator->id, $systemcontext->id);
+        $token = $this->stage_completed_upload((int) $operator->id, 'course.mbz', 'BACKUPDATA');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_SEND,
+            (int) $operator->id,
+            ['token' => $token, 'destination' => import_policy::DEST_COURSEBACKUP, 'courseid' => (int) $course->id],
+            0,
+            \context_course::instance($course->id)->id,
+            'course.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_FAILED, $transfer->status);
+        $this->assertSame(get_string('errornocoursebackupcap', 'repository_largefile'), $transfer->error);
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+        $this->assertCount(1, $messages);
+        $this->assertSame('uploadsent', $messages[0]->eventtype);
+    }
+
+    /**
+     * A queued send to the picker (not a real destination for Send to…) is refused.
+     *
+     * @return void
+     */
+    public function test_send_to_picker_refused(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+        $admin = get_admin();
+        $token = $this->stage_completed_upload((int) $admin->id, 'notes.pdf', 'PDFDATA');
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_SEND,
+            (int) $admin->id,
+            ['token' => $token, 'destination' => import_policy::DEST_PICKER],
+            0,
+            \context_system::instance()->id,
+            'notes.pdf'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+        $this->assertNotNull(\repository_largefile\chunk_store::get_record($token));
+    }
 }

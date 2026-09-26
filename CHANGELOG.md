@@ -2,6 +2,21 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.8.1 — 2026-09-27
+
+- **"Send to…" no longer times out on a large upload.** Sending a completed upload
+  to the private backup area, a course's backup area or private files used to copy
+  the whole file inside the web request, so a very large file (tens of gigabytes)
+  hit a gateway timeout just as Restore… did. The copy now runs in the background
+  as a queued transfer: the page returns straight away, the transfer queue shows
+  its progress and an "Open destination" link when it is done, and the operator is
+  sent a notification. Like the restore jobs it re-checks the site policy and the
+  operator's rights when it runs, and is restart-safe: a retry after an interrupted
+  cron run finishes up a copy that had already landed instead of copying again.
+- An upload with a restore or send queued is shown as "Queued" on Completed
+  uploads, and cannot be removed, sent, restored or swept by the cleanup task until
+  that job has run.
+
 ## 0.8.0 — 2026-09-26
 
 - **Restoring a large completed upload no longer times out.** "Restore…" on the

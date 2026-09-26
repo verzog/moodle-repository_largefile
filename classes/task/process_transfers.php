@@ -108,8 +108,8 @@ class process_transfers extends \core\task\scheduled_task {
         foreach (transfer_manager::reclaim_stale(time() - self::lease_seconds()) as $stale) {
             if ($stale->type === transfer_manager::TYPE_PUBLISH) {
                 transfer_runner::notify_publish_failure($stale);
-            } else if (transfer_runner::is_restore($stale)) {
-                transfer_runner::notify_restore_failure($stale);
+            } else if (transfer_runner::is_consumer($stale)) {
+                transfer_runner::notify_consumer_failure($stale);
             }
         }
         $due = transfer_manager::get_due(time(), self::BATCH);

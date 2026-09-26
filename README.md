@@ -249,6 +249,11 @@ never hits a web-request timeout:
   upload, so it needs no second full-size copy in the file store. It requires
   `moodle/course:create` and `moodle/restore:restorecourse` in the category.
 
+**Send to…** (the other action under *Completed uploads*) works the same way: the
+copy to the chosen destination — your private backup area, a course's backup area
+or your private files — runs in the background, and you are notified with a link to
+where the file landed when it is done.
+
 Queued transfers are started by the `process_transfers` task, which runs every five
 minutes, so a restore starts within about five minutes of being queued.
 

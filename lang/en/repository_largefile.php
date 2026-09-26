@@ -152,6 +152,7 @@ $string['manageshares_desc'] = 'Publish a backup to a trusted peer as an encrypt
     . 'file is encrypted at rest and only the paired peer, signing with the shared secret, can fetch it.';
 $string['messageprovider:restoreready'] = 'Queued course restore finished';
 $string['messageprovider:sharepublished'] = 'Backup share published';
+$string['messageprovider:uploadsent'] = 'Queued send of a completed upload finished';
 $string['nocompleteduploads'] = 'No completed uploads are waiting in the staging area.';
 $string['nopeers'] = 'No trusted peers yet.';
 $string['nopeersforshare'] = 'Add a trusted peer first, exchanging the shared secret with the other site out of band.';
@@ -161,6 +162,10 @@ $string['notifyrestorefailedbody'] = 'The restore of "{$a->filename}" failed: {$
 $string['notifyrestorefailedsubject'] = 'Restore failed: {$a}';
 $string['notifyrestorereadybody'] = 'Your backup "{$a}" has been copied into the course backup area. Continue the restore here:';
 $string['notifyrestorereadysubject'] = 'Backup ready to restore: {$a}';
+$string['notifysendfailedbody'] = 'Sending "{$a->filename}" failed: {$a->error}';
+$string['notifysendfailedsubject'] = 'Send failed: {$a}';
+$string['notifysentbody'] = '"{$a->file}" has been sent to {$a->destination}. Find it here:';
+$string['notifysentsubject'] = 'File sent: {$a}';
 $string['notifysharefailedbody'] = 'Your backup share for "{$a->filename}" could not be created: {$a->error}';
 $string['notifysharefailedsubject'] = 'Backup share failed: {$a}';
 $string['notifysharereadybody'] = 'Your backup "{$a}" has been encrypted and published. The share link is below — give it '
@@ -222,8 +227,6 @@ $string['privacy:metadata:repository_largefile_transfers:type'] = 'The kind of t
 $string['privacy:metadata:repository_largefile_transfers:userid'] = 'The user the transfer runs for.';
 $string['removeallcompleted'] = 'Remove all completed uploads';
 $string['removeallstalled'] = 'Remove all stalled uploads';
-$string['restorealreadyqueued'] = 'A restore of that upload is already queued or running. Watch its progress in the transfer '
-    . 'queue below.';
 $string['restoreautocategory'] = 'Category for the new course';
 $string['restoreautocategory_help'] = 'The category the new course is created in. The site\'s default category is preselected. '
     . 'Only categories where you may both create a course and restore into it are listed.';
@@ -240,7 +243,6 @@ $string['restorecompletedcourse_help'] = 'The course to restore the backup into.
 $string['restorecompletedheading'] = 'Restore a completed upload';
 $string['restorecontinue'] = 'Continue to restore';
 $string['restorecopying'] = 'Copying the backup into the course backup area';
-$string['restoreinprogress'] = 'Restore queued — see the transfer queue below';
 $string['restoremode'] = 'How to restore';
 $string['restoremode_help'] = 'Either copy the backup into an existing course\'s backup area and then choose the restore '
     . 'settings in Moodle\'s restore wizard, or restore it automatically into a new course using the site\'s default '
@@ -260,10 +262,15 @@ $string['revokeshareconfirm'] = 'Revoke this share? The peer will no longer be a
 $string['selectuploaded'] = 'Select uploaded file';
 $string['sendcompleted'] = 'Send to…';
 $string['sendcompleted_desc'] = 'Route this completed upload straight to a real destination (private backup area, a '
-    . 'course\'s backup area, or private files) — no need to reopen the large file picker to select it.';
+    . 'course\'s backup area, or private files) — no need to reopen the large file picker to select it. Large files are '
+    . 'copied in the background, so this page will not time out: you are notified when it is done, and the transfer queue '
+    . 'below shows its progress.';
 $string['sendcompletedbutton'] = 'Send';
 $string['sendcompletedheading'] = 'Send a completed upload';
-$string['sendcompletedsuccess'] = 'Sent "{$a->file}" to {$a->destination}.';
+$string['sendcopying'] = 'Copying to {$a}';
+$string['sendopendestination'] = 'Open destination';
+$string['sendqueued'] = '"{$a->file}" has been queued to be sent to {$a->destination}. It runs in the background (it starts '
+    . 'within about five minutes); you will be sent a notification when it is done. You can close this page.';
 $string['setting:accept'] = 'Accept';
 $string['setting:chunksize'] = 'Chunk size (MB)';
 $string['setting:chunksize_help'] = 'Size of each chunk sent to the server when uploading a large file, in megabytes. '
@@ -369,6 +376,7 @@ $string['transfertype'] = 'Type';
 $string['transfertypeautorestore'] = 'Automatic restore (new course)';
 $string['transfertypepublish'] = 'Backup share (publish)';
 $string['transfertyperestore'] = 'Restore preparation';
+$string['transfertypesend'] = 'Send to destination';
 $string['transfertypeshare'] = 'Peer share import';
 $string['transfertypeurl'] = 'URL import';
 $string['transferurl'] = 'File URL';
@@ -380,12 +388,17 @@ $string['transferwhenat'] = 'At a scheduled time';
 $string['transferwhennow'] = 'As soon as possible';
 $string['unlimited'] = 'Unlimited';
 $string['uploadalreadyfinished'] = 'That upload had already finished, so there was nothing to remove.';
+$string['uploadalreadyqueued'] = 'A restore or send of that upload is already queued or running. Watch its progress in the '
+    . 'transfer queue below.';
+$string['uploadbusyqueued'] = 'That upload has a restore or send queued or running, so it cannot be removed, sent or restored '
+    . 'until that job has finished.';
 $string['uploaded'] = 'File uploaded';
 $string['uploadexpiredrestart'] = 'Your earlier upload of "{$a}" is no longer available on the server, so it will start over '
     . 'from the beginning.';
 $string['uploading'] = 'Uploading…';
 $string['uploadinstructions'] = 'The file is uploaded in small chunks, so PHP\'s per-request upload size does not apply. '
     . 'Keep this window open until the upload finishes.';
+$string['uploadjobqueued'] = 'Queued — see the transfer queue below';
 $string['uploadlastactivity'] = 'Last activity';
 $string['uploadmode'] = 'Mode';
 $string['uploadmodebackground'] = 'Background (continues after the tab is closed)';
@@ -393,8 +406,6 @@ $string['uploadmodeforeground'] = 'In-page (only while the tab is open)';
 $string['uploadnotfinished'] = 'The upload did not finish.';
 $string['uploadremoved'] = 'Upload removed.';
 $string['uploadremovefailed'] = 'The upload could not be removed; it will be cleared by the cleanup task. Try again shortly.';
-$string['uploadrestorequeued'] = 'That upload has a restore queued or running, so it cannot be removed or sent '
-    . 'elsewhere until the restore has finished.';
 $string['uploadsinprogress'] = 'Uploads in progress';
 $string['uploadsize'] = 'Size';
 $string['uploadsremoved'] = 'Removed {$a} upload(s).';
