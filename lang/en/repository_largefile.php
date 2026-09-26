@@ -79,6 +79,8 @@ $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled 
 $string['errorrestorebusy'] = 'That completed upload is busy with another action (Send to…, Remove or another restore). '
     . 'Try again shortly.';
 $string['errorrestoreextract'] = 'The backup file could not be unpacked. It may be incomplete or not a Moodle backup.';
+$string['errorrestoremodeunavailable'] = 'Restoring this upload is not available: the course backup area destination is '
+    . 'disabled and you may not create a course in any category.';
 $string['errorrestorenotbackup'] = 'Only a Moodle course backup (.mbz) can be restored directly. Use Send to… to route the '
     . 'file into a real destination first.';
 $string['errorrestoreprecheck'] = 'The restore checks failed: {$a}';
@@ -391,6 +393,8 @@ $string['uploadmodeforeground'] = 'In-page (only while the tab is open)';
 $string['uploadnotfinished'] = 'The upload did not finish.';
 $string['uploadremoved'] = 'Upload removed.';
 $string['uploadremovefailed'] = 'The upload could not be removed; it will be cleared by the cleanup task. Try again shortly.';
+$string['uploadrestorequeued'] = 'That upload has a restore queued or running, so it cannot be removed or sent '
+    . 'elsewhere until the restore has finished.';
 $string['uploadsinprogress'] = 'Uploads in progress';
 $string['uploadsize'] = 'Size';
 $string['uploadsremoved'] = 'Removed {$a} upload(s).';

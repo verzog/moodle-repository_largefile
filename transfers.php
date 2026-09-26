@@ -126,6 +126,9 @@ if ($action === 'removeallstalled') {
 if ($action === 'sendcompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_restore_tokens(), true)) {
+        redirect($baseurl, get_string('uploadrestorequeued', 'repository_largefile'));
+    }
     $record = $uploadid !== '' ? chunk_store::get_record($uploadid) : null;
     if (!$record || (int) $record->state !== chunk_store::STATE_COMPLETED) {
         redirect($baseurl, get_string('completeduploadgone', 'repository_largefile'));
@@ -272,6 +275,9 @@ if ($action === 'restorecompleted') {
     if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
         redirect($baseurl, get_string('errorrestorenotbackup', 'repository_largefile'));
     }
+    if (!completed_restore_form::available_modes()) {
+        redirect($baseurl, get_string('errorrestoremodeunavailable', 'repository_largefile'));
+    }
     $form = new completed_restore_form(
         new moodle_url($baseurl, ['action' => 'restorecompleted', 'uploadid' => $uploadid]),
         ['uploadid' => $uploadid, 'filename' => $record->filename]
@@ -280,72 +286,74 @@ if ($action === 'restorecompleted') {
         redirect($baseurl);
     }
     if ($data = $form->get_data()) {
-        // Both kinds of restore run in the background (see below), so never queue
-        // a second one for the same upload while one is still waiting or running.
-        if (in_array((string) $record->id, transfer_manager::active_restore_tokens(), true)) {
-            redirect($baseurl, get_string('restorealreadyqueued', 'repository_largefile'));
-        }
-        if (($data->mode ?? '') === completed_restore_form::MODE_AUTO) {
+        $mode = (string) ($data->mode ?? '');
+        if ($mode === completed_restore_form::MODE_AUTO) {
             // Restore unattended into a new course. The form validated the category
             // against the operator's rights; the runner re-checks them when it runs.
             $categoryid = (int) $data->categoryid;
-            transfer_manager::create(
-                transfer_manager::TYPE_AUTORESTORE,
-                (int) $USER->id,
-                [
-                    'token' => (string) $record->id,
-                    'categoryid' => $categoryid,
-                    'filesize' => (int) $record->length,
-                ],
-                0,
-                \context_coursecat::instance($categoryid)->id,
-                (string) $record->filename
-            );
-            redirect(
-                $baseurl,
-                get_string('restoreautoqueued', 'repository_largefile', format_string((string) $record->filename)),
-                null,
-                \core\output\notification::NOTIFY_SUCCESS
-            );
+            $type = transfer_manager::TYPE_AUTORESTORE;
+            $payload = ['categoryid' => $categoryid];
+            $contextid = \context_coursecat::instance($categoryid)->id;
+            $queuedkey = 'restoreautoqueued';
+        } else {
+            $courseid = (int) ($data->courseid ?? 0);
+            $coursecontext = \context_course::instance($courseid, IGNORE_MISSING);
+            // Both caps re-checked here so a background course change or a spoofed
+            // form can never route a file into a course whose restore the user cannot
+            // then start. The course picker already limited the options to these.
+            if (
+                !$coursecontext
+                    || !has_capability('moodle/restore:uploadfile', $coursecontext)
+                    || !has_capability('moodle/restore:restorecourse', $coursecontext)
+            ) {
+                redirect(
+                    $baseurl,
+                    get_string('errornocoursebackupcap', 'repository_largefile'),
+                    null,
+                    \core\output\notification::NOTIFY_ERROR
+                );
+            }
+            // Copying a multi-gigabyte backup into the course backup area (hashing it
+            // into the file pool) takes minutes — far longer than a web request lives
+            // behind a proxy, which answers with a gateway timeout. So queue the copy
+            // as a background transfer: the runner re-checks these rights, copies the
+            // file under cron, then notifies the operator with a link straight into
+            // the restore wizard (also shown on this page's transfer queue).
+            $type = transfer_manager::TYPE_RESTORE;
+            $payload = ['courseid' => $courseid];
+            $contextid = $coursecontext->id;
+            $queuedkey = 'restorequeued';
         }
-        $courseid = (int) ($data->courseid ?? 0);
-        $coursecontext = \context_course::instance($courseid, IGNORE_MISSING);
-        // Both caps re-checked here so a background course change or a spoofed
-        // form can never route a file into a course whose restore the user cannot
-        // then start. The course picker already limited the options to these.
-        if (
-            !$coursecontext
-                || !has_capability('moodle/restore:uploadfile', $coursecontext)
-                || !has_capability('moodle/restore:restorecourse', $coursecontext)
-        ) {
+        $payload += ['token' => (string) $record->id, 'filesize' => (int) $record->length];
+
+        // Both kinds of restore run in the background, so never queue a second one
+        // for the same upload while one is still waiting or running. The check and
+        // the queueing happen under the upload's lock, so two operators submitting
+        // at once cannot both get through.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock($record->id, 10);
+        if (!$lock) {
             redirect(
                 $baseurl,
-                get_string('errornocoursebackupcap', 'repository_largefile'),
+                get_string('errorrestorebusy', 'repository_largefile'),
                 null,
                 \core\output\notification::NOTIFY_ERROR
             );
         }
-        // Copying a multi-gigabyte backup into the course backup area (hashing it
-        // into the file pool) takes minutes — far longer than a web request lives
-        // behind a proxy, which answers with a gateway timeout. So queue the copy
-        // as a background transfer: the runner re-checks these rights, copies the
-        // file under cron, then notifies the operator with a link straight into
-        // the restore wizard (also shown on this page's transfer queue).
-        transfer_manager::create(
-            transfer_manager::TYPE_RESTORE,
-            (int) $USER->id,
-            [
-                'token' => (string) $record->id,
-                'courseid' => $courseid,
-                'filesize' => (int) $record->length,
-            ],
-            0,
-            $coursecontext->id,
-            (string) $record->filename
-        );
+        try {
+            $alreadyqueued = in_array((string) $record->id, transfer_manager::active_restore_tokens(), true);
+            if (!$alreadyqueued) {
+                transfer_manager::create($type, (int) $USER->id, $payload, 0, $contextid, (string) $record->filename);
+            }
+        } finally {
+            $lock->release();
+        }
+        if ($alreadyqueued) {
+            redirect($baseurl, get_string('restorealreadyqueued', 'repository_largefile'));
+        }
         redirect(
             $baseurl,
-            get_string('restorequeued', 'repository_largefile', format_string((string) $record->filename)),
+            get_string($queuedkey, 'repository_largefile', format_string((string) $record->filename)),
             null,
             \core\output\notification::NOTIFY_SUCCESS
         );
@@ -364,6 +372,9 @@ if ($action === 'restorecompleted') {
 if ($action === 'removecompleted') {
     require_sesskey();
     $uploadid = optional_param('uploadid', '', PARAM_ALPHANUM);
+    if ($uploadid !== '' && in_array($uploadid, transfer_manager::active_restore_tokens(), true)) {
+        redirect($baseurl, get_string('uploadrestorequeued', 'repository_largefile'));
+    }
     $outcome = $uploadid !== ''
         ? \repository_largefile\chunk_store::delete_in_state($uploadid, \repository_largefile\chunk_store::STATE_COMPLETED)
         : 'notstarted';
@@ -379,7 +390,12 @@ if ($action === 'removecompleted') {
 if ($action === 'removeallcompleted') {
     require_sesskey();
     if (optional_param('confirm', 0, PARAM_BOOL)) {
-        $removed = \repository_largefile\chunk_store::delete_all_in_state(\repository_largefile\chunk_store::STATE_COMPLETED);
+        // Leave alone any upload a queued or running job (a restore or a share
+        // publication) still needs, as the cleanup task does.
+        $removed = \repository_largefile\chunk_store::delete_all_in_state(
+            \repository_largefile\chunk_store::STATE_COMPLETED,
+            transfer_manager::active_source_tokens()
+        );
         redirect($baseurl, get_string('uploadsremoved', 'repository_largefile', $removed));
     }
     echo $OUTPUT->header();

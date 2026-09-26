@@ -289,6 +289,10 @@ class manage_page {
         // Uploads a queued or running restore is working on: their actions would race
         // the background job, so the row just says a restore is in hand.
         $restoring = array_flip(transfer_manager::active_restore_tokens());
+        // Restore… is offered when either restore route is available to this user
+        // (copy into a course's backup area, or restore automatically into a new
+        // course); worked out once here, not per row.
+        $canrestore = (bool) \repository_largefile\form\completed_restore_form::available_modes();
         $table = new \html_table();
         $table->head = [
             get_string('transferuser', 'repository_largefile'),
@@ -317,19 +321,11 @@ class manage_page {
                 get_string('sendcompleted', 'repository_largefile')
             );
             $actions = [$send];
-            // Restore a course backup directly on a chosen course. Only shown for
-            // .mbz files (the only kind the Moodle restore wizard reads) *and*
-            // only when the course backup area destination is enabled site-wide —
-            // the handler routes the file there, and store_imported_file() would
-            // reject any other destination for this action, so a link that could
-            // not succeed is not offered in the first place.
+            // Restore a course backup directly. Only shown for .mbz files (the only
+            // kind Moodle's restore reads) and only when a restore route is
+            // available, so a link that could not succeed is not offered.
             $isbackup = import_policy::detect_type((string) $row->filename) === import_policy::TYPE_BACKUP;
-            $coursebackupon = in_array(
-                import_policy::DEST_COURSEBACKUP,
-                import_policy::destinations_for(import_policy::TYPE_BACKUP),
-                true
-            );
-            if ($isbackup && $coursebackupon) {
+            if ($isbackup && $canrestore) {
                 $actions[] = \html_writer::link(
                     new \moodle_url($baseurl, [
                         'action' => 'restorecompleted',

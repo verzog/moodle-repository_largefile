@@ -243,6 +243,29 @@ class transfer_manager {
     }
 
     /**
+     * Record a checkpoint in a transfer's payload, merged into what is there.
+     *
+     * A long job that is interrupted (worker restart, host shutdown) is retried by
+     * {@see self::reclaim_stale()}; a checkpoint lets the retry recognise work the
+     * earlier attempt already finished instead of repeating a non-idempotent step.
+     *
+     * @param int $id The transfer id.
+     * @param string $key The payload key.
+     * @param mixed $value The value to store (JSON-serialisable).
+     * @return void
+     */
+    public static function set_payload_value(int $id, string $key, $value): void {
+        global $DB;
+        $transfer = self::get($id);
+        if (!$transfer) {
+            return;
+        }
+        $payload = self::payload($transfer);
+        $payload[$key] = $value;
+        $DB->set_field(self::TABLE, 'payload', json_encode($payload), ['id' => $id]);
+    }
+
+    /**
      * Record the transfer's file name once it becomes known (a URL import learns it
      * from the response, a share import from the peer's metadata), so the Transfers
      * table shows what is being moved while the job is still running.

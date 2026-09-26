@@ -851,13 +851,18 @@ class chunk_store {
      * clears staged files that were uploaded but never selected.
      *
      * @param int $state The state to clear (a STATE_* constant).
+     * @param array $keep Token ids to leave alone (e.g. uploads a queued job still needs).
      * @return int How many uploads were actually removed.
      */
-    public static function delete_all_in_state(int $state): int {
+    public static function delete_all_in_state(int $state, array $keep = []): int {
         global $DB;
         $ids = $DB->get_fieldset_select(self::TABLE, 'id', 'state = :state', ['state' => $state]);
+        $keep = array_flip(array_map('strval', $keep));
         $removed = 0;
         foreach ($ids as $id) {
+            if (isset($keep[(string) $id])) {
+                continue;
+            }
             if (self::delete_in_state((string) $id, $state) === 'removed') {
                 $removed++;
             }

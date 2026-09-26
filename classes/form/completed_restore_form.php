@@ -24,6 +24,8 @@
 
 namespace repository_largefile\form;
 
+use repository_largefile\local\import_policy;
+
 defined('MOODLE_INTERNAL') || die();
 
 require_once($GLOBALS['CFG']->libdir . '/formslib.php');
@@ -71,60 +73,83 @@ class completed_restore_form extends \moodleform {
 
         // Two ways to restore: prepare the file in an existing course and open the
         // restore wizard on it (the operator then picks settings), or restore it
-        // unattended into a brand-new course with the site's default settings.
-        $modes = [
-            $mform->createElement(
-                'radio',
-                'mode',
-                '',
-                get_string('restoremodewizard', 'repository_largefile'),
-                self::MODE_WIZARD
-            ),
-            $mform->createElement(
-                'radio',
-                'mode',
-                '',
-                get_string('restoremodeauto', 'repository_largefile'),
-                self::MODE_AUTO
-            ),
-        ];
-        $mform->addGroup($modes, 'modegroup', get_string('restoremode', 'repository_largefile'), '<br>', false);
-        $mform->setType('mode', PARAM_ALPHA);
-        $mform->setDefault('mode', self::MODE_WIZARD);
-        $mform->addHelpButton('modegroup', 'restoremode', 'repository_largefile');
-
-        // A restore drives both upload and restore, so limit the course picker to
-        // courses where the user holds both — offering a course they could not
-        // finish the restore in would surface the failure only after the file was
-        // already copied in and pathnamehash computed.
-        $courseopts = ['requiredcapabilities' => ['moodle/restore:uploadfile', 'moodle/restore:restorecourse']];
-        $mform->addElement(
-            'course',
-            'courseid',
-            get_string('restorecompletedcourse', 'repository_largefile'),
-            $courseopts
-        );
-        $mform->addHelpButton('courseid', 'restorecompletedcourse', 'repository_largefile');
-        $mform->hideIf('courseid', 'mode', 'neq', self::MODE_WIZARD);
-
-        // Only categories the operator may both create a course in and restore
-        // into; the site's default category is preselected when it qualifies.
-        $categories = self::auto_restore_categories();
-        $mform->addElement(
-            'select',
-            'categoryid',
-            get_string('restoreautocategory', 'repository_largefile'),
-            $categories
-        );
-        $mform->setType('categoryid', PARAM_INT);
-        $default = \core_course_category::get_default();
-        if ($default && isset($categories[$default->id])) {
-            $mform->setDefault('categoryid', $default->id);
+        // unattended into a brand-new course with the site's default settings. Only
+        // the ways available here are offered; with just one, no choice is shown.
+        $modes = self::available_modes();
+        if (count($modes) > 1) {
+            $radios = [];
+            foreach ($modes as $mode) {
+                $radios[] = $mform->createElement(
+                    'radio',
+                    'mode',
+                    '',
+                    get_string('restoremode' . $mode, 'repository_largefile'),
+                    $mode
+                );
+            }
+            $mform->addGroup($radios, 'modegroup', get_string('restoremode', 'repository_largefile'), '<br>', false);
+            $mform->addHelpButton('modegroup', 'restoremode', 'repository_largefile');
+        } else {
+            $mform->addElement('hidden', 'mode');
         }
-        $mform->addHelpButton('categoryid', 'restoreautocategory', 'repository_largefile');
-        $mform->hideIf('categoryid', 'mode', 'neq', self::MODE_AUTO);
+        $mform->setType('mode', PARAM_ALPHA);
+        $mform->setDefault('mode', reset($modes));
+
+        if (in_array(self::MODE_WIZARD, $modes, true)) {
+            // A restore drives both upload and restore, so limit the course picker to
+            // courses where the user holds both — offering a course they could not
+            // finish the restore in would surface the failure only after the file was
+            // already copied in.
+            $courseopts = ['requiredcapabilities' => ['moodle/restore:uploadfile', 'moodle/restore:restorecourse']];
+            $mform->addElement(
+                'course',
+                'courseid',
+                get_string('restorecompletedcourse', 'repository_largefile'),
+                $courseopts
+            );
+            $mform->addHelpButton('courseid', 'restorecompletedcourse', 'repository_largefile');
+            $mform->hideIf('courseid', 'mode', 'neq', self::MODE_WIZARD);
+        }
+
+        if (in_array(self::MODE_AUTO, $modes, true)) {
+            // Only categories the operator may both create a course in and restore
+            // into; the site's default category is preselected when it qualifies.
+            $categories = self::auto_restore_categories();
+            $mform->addElement(
+                'select',
+                'categoryid',
+                get_string('restoreautocategory', 'repository_largefile'),
+                $categories
+            );
+            $mform->setType('categoryid', PARAM_INT);
+            $default = \core_course_category::get_default();
+            if ($default && isset($categories[$default->id])) {
+                $mform->setDefault('categoryid', $default->id);
+            }
+            $mform->addHelpButton('categoryid', 'restoreautocategory', 'repository_largefile');
+            $mform->hideIf('categoryid', 'mode', 'neq', self::MODE_AUTO);
+        }
 
         $this->add_action_buttons(true, get_string('restorecompletedbutton', 'repository_largefile'));
+    }
+
+    /**
+     * The ways the current user may restore a completed backup upload here: the
+     * wizard route needs the course backup area destination to be enabled (that is
+     * where the file is copied), the automatic route needs a category the user may
+     * create and restore a course in.
+     *
+     * @return string[] MODE_* constants, the wizard first when both are available.
+     */
+    public static function available_modes(): array {
+        $modes = [];
+        if (import_policy::is_destination_allowed(import_policy::TYPE_BACKUP, import_policy::DEST_COURSEBACKUP)) {
+            $modes[] = self::MODE_WIZARD;
+        }
+        if (self::auto_restore_categories()) {
+            $modes[] = self::MODE_AUTO;
+        }
+        return $modes;
     }
 
     /**
@@ -151,7 +176,9 @@ class completed_restore_form extends \moodleform {
      */
     public function validation($data, $files) {
         $errors = parent::validation($data, $files);
-        if (($data['mode'] ?? '') === self::MODE_AUTO) {
+        if (!in_array($data['mode'] ?? '', self::available_modes(), true)) {
+            $errors['modegroup'] = get_string('errorrestoremodeunavailable', 'repository_largefile');
+        } else if (($data['mode'] ?? '') === self::MODE_AUTO) {
             if (empty($data['categoryid']) || !isset(self::auto_restore_categories()[$data['categoryid']])) {
                 $errors['categoryid'] = get_string('errornocategorychosen', 'repository_largefile');
             }

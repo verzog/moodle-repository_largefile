@@ -509,6 +509,11 @@ class transfer_runner {
      * runs unattended, so the operator's rights are re-checked now rather than
      * trusted from when it was queued.
      *
+     * Restart-safe: the target file name is checkpointed on the transfer before the
+     * copy, so a retry after an interrupted attempt recognises a copy that already
+     * landed (a file record only exists once its content is fully stored) and just
+     * finishes up, rather than copying again or failing on the consumed upload.
+     *
      * @param \stdClass $transfer The transfer row.
      * @param array $payload Decoded payload; expects 'token' and 'courseid'.
      * @return string The stored backup file name in the course backup area.
@@ -522,11 +527,28 @@ class transfer_runner {
         if (
             !$coursecontext
                 || !has_capability('repository/largefile:import', \context_system::instance(), $userid)
-                || !has_capability('moodle/restore:uploadfile', $coursecontext, $userid)
+                || !import_policy::can_use_course_backup($userid, $courseid)
                 || !has_capability('moodle/restore:restorecourse', $coursecontext, $userid)
         ) {
             throw new \moodle_exception('errornocoursebackupcap', 'repository_largefile');
         }
+        if (!import_policy::is_type_accepted(import_policy::TYPE_BACKUP)) {
+            throw new \moodle_exception(
+                'errortypenotaccepted',
+                'repository_largefile',
+                '',
+                import_policy::type_label(import_policy::TYPE_BACKUP)
+            );
+        }
+        if (!import_policy::is_destination_allowed(import_policy::TYPE_BACKUP, import_policy::DEST_COURSEBACKUP)) {
+            throw new \moodle_exception(
+                'errordestnotallowed',
+                'repository_largefile',
+                '',
+                import_policy::type_label(import_policy::TYPE_BACKUP)
+            );
+        }
+        $fs = get_file_storage();
 
         // Hold the same per-token lock the Transfers page actions (Send to…, Remove)
         // take, so none of them can move or delete the source while it is copied.
@@ -536,6 +558,15 @@ class transfer_runner {
             throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
         }
         try {
+            // An earlier, interrupted attempt already stored the copy: finish up.
+            $done = (string) ($payload['storedname'] ?? '');
+            if ($done !== '' && $fs->file_exists($coursecontext->id, 'backup', 'course', 0, '/', $done)) {
+                if (\repository_largefile\chunk_store::get_record($token)) {
+                    \repository_largefile\chunk_store::delete($token);
+                }
+                return $done;
+            }
+
             $record = \repository_largefile\chunk_store::get_record($token);
             if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
                 throw new \moodle_exception('completeduploadgone', 'repository_largefile');
@@ -548,18 +579,25 @@ class transfer_runner {
                 throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
             }
             transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
-            $stored = import_policy::store_imported_file(
-                $userid,
-                $srcpath,
-                (string) $record->filename,
-                import_policy::DEST_COURSEBACKUP,
-                (int) $record->contextid,
-                $courseid
-            );
-            // Remove the row via chunk_store::delete(), which re-attempts the source
-            // unlink and keeps the row for the cleanup task if the bytes remain.
+
+            $filename = (string) $record->filename;
+            if ($fs->file_exists($coursecontext->id, 'backup', 'course', 0, '/', $filename)) {
+                $filename = time() . '-' . $filename;
+            }
+            transfer_manager::set_payload_value((int) $transfer->id, 'storedname', $filename);
+            $fs->create_file_from_pathname([
+                'contextid' => $coursecontext->id,
+                'component' => 'backup',
+                'filearea' => 'course',
+                'itemid' => 0,
+                'filepath' => '/',
+                'filename' => $filename,
+                'userid' => $userid,
+            ], $srcpath);
+            // Remove the row and its file via chunk_store::delete(), which keeps the
+            // row for the cleanup task if the bytes cannot be removed.
             \repository_largefile\chunk_store::delete((string) $record->id);
-            return $stored;
+            return $filename;
         } finally {
             $lock->release();
         }
@@ -573,7 +611,14 @@ class transfer_runner {
      * from the staged upload into the backup temp directory — no copy into the file
      * pool first, which for a very large backup saves both time and its full size in
      * disk. The staged upload is removed only once the restore has succeeded, so a
-     * failed restore can simply be tried again.
+     * failed restore can simply be tried again. The restore runs as the operator
+     * (not the cron user), so the courses, activities and events it creates are
+     * attributed to them.
+     *
+     * Restart-safe: the new course's id and the restore's completion are
+     * checkpointed on the transfer. A retry after an interrupted attempt removes a
+     * half-restored course and starts again, or — when the restore had already
+     * finished — just finishes up, so it never restores a second course.
      *
      * @param \stdClass $transfer The transfer row.
      * @param array $payload Decoded payload; expects 'token' and 'categoryid'.
@@ -582,7 +627,7 @@ class transfer_runner {
      *         or the restore's prechecks fail.
      */
     private static function run_auto_restore(\stdClass $transfer, array $payload): string {
-        global $CFG, $DB;
+        global $CFG, $DB, $USER;
         require_once($CFG->dirroot . '/backup/util/includes/restore_includes.php');
 
         $userid = (int) $transfer->userid;
@@ -598,17 +643,35 @@ class transfer_runner {
             throw new \moodle_exception('errornocategorycap', 'repository_largefile');
         }
 
-        // Unpack under the same per-token lock the Transfers page actions take, so the
-        // source cannot be moved or removed mid-read; the restore itself then works
-        // from the unpacked copy and needs no lock.
-        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
-        $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
-        if (!$lock) {
-            throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
+        // Checkpoints from an earlier, interrupted attempt.
+        $earliercourseid = (int) ($payload['courseid'] ?? 0);
+        if ($earliercourseid > 0 && $DB->record_exists('course', ['id' => $earliercourseid])) {
+            if (!empty($payload['restored'])) {
+                // The restore finished; only the clean-up of the upload was missed.
+                \repository_largefile\chunk_store::delete_in_state(
+                    $token,
+                    \repository_largefile\chunk_store::STATE_COMPLETED
+                );
+                return (string) $earliercourseid;
+            }
+            // A half-restored course: remove it and restore from scratch.
+            delete_course($earliercourseid, false);
         }
+
+        $user = \core_user::get_user($userid, '*', MUST_EXIST);
+        $previoususer = $USER;
+        \core\session\manager::set_user($user);
         $backupdir = \restore_controller::get_tempdir_name(SITEID, $userid);
         $path = make_backup_temp_directory($backupdir);
         try {
+            // Unpack under the same per-token lock the Transfers page actions take, so
+            // the source cannot be moved or removed mid-read; the restore itself then
+            // works from the unpacked copy and needs no lock.
+            $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+            $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
+            if (!$lock) {
+                throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
+            }
             try {
                 $record = \repository_largefile\chunk_store::get_record($token);
                 if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
@@ -636,6 +699,7 @@ class transfer_runner {
                 get_string('restoringcourseshortname', 'backup')
             );
             $courseid = \restore_dbops::create_new_course($fullname, $shortname, $categoryid);
+            transfer_manager::set_payload_value((int) $transfer->id, 'courseid', (int) $courseid);
             $rc = null;
             try {
                 $rc = new \restore_controller(
@@ -687,7 +751,9 @@ class transfer_runner {
                     'visible' => 1,
                 ]);
             }
+            transfer_manager::set_payload_value((int) $transfer->id, 'restored', 1);
         } finally {
+            \core\session\manager::set_user($previoususer);
             // A successful plan removes its own temp directory; a failed one may not.
             if (is_dir($path)) {
                 fulldelete($path);

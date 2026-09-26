@@ -22,7 +22,17 @@ All notable changes to `repository_largefile` are documented here.
   so, unlike the wizard route, it does not first need a second full-size copy in
   the file store — and notifies the operator with a link to the new course when it
   finishes. Only categories where the operator may create a course and restore are
-  offered, and the rights are re-checked when the job runs.
+  offered, and the rights are re-checked when the job runs. The restore runs as
+  the operator, so what it creates is attributed to them, and it is offered even
+  where the course backup area destination is disabled (only the wizard route
+  needs it).
+- **Restores survive an interrupted cron run.** Both restore jobs checkpoint their
+  progress, so a retry after a worker restart finishes up a copy or restore that
+  had already completed — never restoring a second course or reporting a false
+  failure — and cleanly redoes one that had not.
+- **A queued restore's upload is protected.** "Remove all completed uploads", Remove
+  and Send to… leave alone an upload a queued restore still needs, and two
+  operators restoring the same upload at once cannot both queue it.
 
 ## 0.7.9 — 2026-09-23
 
