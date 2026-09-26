@@ -399,6 +399,23 @@ final class transfer_runner_test extends \advanced_testcase {
     }
 
     /**
+     * Enable the Large file repository type, as it is on a site that uses it.
+     *
+     * Moodle drops notifications from a disabled plugin's message providers, and a
+     * fresh test site has no repository instance for this plugin, so without this
+     * the restore notifications would never reach the message sink.
+     *
+     * @return void
+     */
+    private function enable_repository(): void {
+        global $DB;
+        if (!$DB->record_exists('repository', ['type' => 'largefile'])) {
+            $DB->insert_record('repository', (object) ['type' => 'largefile', 'visible' => 1, 'sortorder' => 1]);
+        }
+        \core_plugin_manager::reset_caches();
+    }
+
+    /**
      * A queued restore preparation copies the completed upload into the chosen
      * course's backup area, consumes the upload, links to the restore wizard and
      * notifies the operator.
@@ -407,6 +424,7 @@ final class transfer_runner_test extends \advanced_testcase {
      */
     public function test_restore_prep_copies_into_course_backup_area(): void {
         $this->resetAfterTest(true);
+        $this->enable_repository();
         $this->setAdminUser();
         $admin = get_admin();
         $course = $this->getDataGenerator()->create_course();
@@ -456,6 +474,7 @@ final class transfer_runner_test extends \advanced_testcase {
      */
     public function test_restore_prep_without_capability_fails(): void {
         $this->resetAfterTest(true);
+        $this->enable_repository();
         $user = $this->getDataGenerator()->create_user();
         $course = $this->getDataGenerator()->create_course();
         $token = $this->stage_completed_upload((int) $user->id, 'course.mbz', 'BACKUPDATA');
@@ -485,6 +504,7 @@ final class transfer_runner_test extends \advanced_testcase {
     public function test_auto_restore_without_capability_fails(): void {
         global $DB;
         $this->resetAfterTest(true);
+        $this->enable_repository();
         $user = $this->getDataGenerator()->create_user();
         $category = $this->getDataGenerator()->create_category();
         $token = $this->stage_completed_upload((int) $user->id, 'course.mbz', 'BACKUPDATA');
@@ -517,6 +537,7 @@ final class transfer_runner_test extends \advanced_testcase {
         global $CFG, $DB;
         require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');
         $this->resetAfterTest(true);
+        $this->enable_repository();
         $this->setAdminUser();
         $admin = get_admin();
         $generator = $this->getDataGenerator();
