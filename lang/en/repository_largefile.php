@@ -83,6 +83,7 @@ $string['errorrestorecourseleft'] = 'The restore failed, and its unfinished cour
 $string['errorrestoreextract'] = 'The backup file could not be unpacked. It may be incomplete or not a Moodle backup.';
 $string['errorrestoremodeunavailable'] = 'Restoring this upload is not available: the course backup area destination is '
     . 'disabled and you may not create a course in any category.';
+$string['errorrestorenofile'] = 'That backup is no longer available, or you may no longer use it.';
 $string['errorrestorenotbackup'] = 'Only a Moodle course backup (.mbz) can be restored directly. Use Send to… to route the '
     . 'file into a real destination first.';
 $string['errorrestoreprecheck'] = 'The restore checks failed: {$a}';
@@ -255,6 +256,18 @@ $string['restorequeued'] = '"{$a}" has been queued to be copied into the course 
     . '(it starts within about five minutes); when it is ready you will be sent a notification, and a "Continue to '
     . 'restore" link appears in the transfer queue below. You can close this page.';
 $string['restorerunning'] = 'Restoring into a new course';
+$string['restorestored'] = 'Restore an existing backup…';
+$string['restorestored_desc'] = 'Restore a course backup that is already on this site — in your private backup area or private '
+    . 'files, or a course\'s backup area you may download from — into a new course. It runs in the background, so it does '
+    . 'not time out however large the backup is, and the backup itself is left where it is.';
+$string['restorestoredalready'] = 'A restore of that backup is already queued or running. Watch its progress in the transfer queue '
+    . 'below.';
+$string['restorestoredheading'] = 'Restore an existing backup';
+$string['restorestorednone'] = 'There is no course backup on this site that you may restore, or no category you may create a '
+    . 'course in.';
+$string['restorestoredsource'] = 'Backup';
+$string['restorestoredsource_help'] = 'The course backup (.mbz) to restore. Listed are backups in your private backup area and '
+    . 'private files, and in the backup areas of courses you may download backups from.';
 $string['restoreunpacking'] = 'Unpacking the backup';
 $string['restoreviewcourse'] = 'View the restored course';
 $string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
@@ -340,7 +353,7 @@ $string['sharesourceuploadlink'] = 'upload a large file';
 $string['sharingmanagement'] = 'Backup sharing';
 $string['showcompleteduploads'] = 'Show completed uploads ({$a})';
 $string['sourcebackuparea'] = 'My backup area';
-$string['sourcecoursebackup'] = 'Course backup';
+$string['sourcecoursebackupof'] = 'Backup area of {$a}';
 $string['sourceprivatefiles'] = 'My private files';
 $string['sourceuploaded'] = 'Uploaded large file';
 $string['tabupload'] = 'Upload a large file';

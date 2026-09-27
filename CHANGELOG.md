@@ -2,6 +2,21 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.8.3 — 2026-09-27
+
+- **Restore an existing backup.** A new **Restore an existing backup…** button on
+  the Transfers page restores a course backup that is already on the site — in your
+  private backup area or private files, or a course's backup area you may download
+  from — into a new course, in the background, with the same progress percentage,
+  notification and clean-up as the automatic restore of an upload. A very large
+  backup already on the server never has to be uploaded again, nor restored through
+  the restore wizard, whose in-browser steps time out on it. The backup is read
+  where it is stored (no extra copy is made) and is always left in place. Your
+  rights to the backup and the category are re-checked when the job runs, and the
+  same backup cannot be queued for restore twice at once.
+- Course backups offered as a share or restore source now name their course
+  ("Backup area of COURSE101") instead of just "Course backup".
+
 ## 0.8.2 — 2026-09-27
 
 - **Progress percentage for an automatic restore.** While "Restore automatically

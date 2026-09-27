@@ -250,6 +250,12 @@ never hits a web-request timeout:
   queue shows its progress as a percentage while it runs. It requires
   `moodle/course:create` and `moodle/restore:restorecourse` in the category.
 
+**Restore an existing backup…** (a button on the Transfers page) does the same
+automatic restore for a course backup that is already on the site — in your private
+backup area or private files, or a course's backup area you may download from — so
+a large backup never has to be uploaded again. The backup is read in place and left
+where it is.
+
 **Send to…** (the other action under *Completed uploads*) works the same way: the
 copy to the chosen destination — your private backup area, a course's backup area
 or your private files — runs in the background, and you are notified with a link to

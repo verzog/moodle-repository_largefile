@@ -522,6 +522,34 @@ class transfer_manager {
     }
 
     /**
+     * Stored-file ids with an automatic restore queued or running, so the same
+     * backup is not queued for restore twice (each run would create a course).
+     *
+     * @return int[] File ids.
+     */
+    public static function active_stored_restore_fileids(): array {
+        global $DB;
+        [$insql, $params] = $DB->get_in_or_equal(
+            [self::STATUS_SCHEDULED, self::STATUS_RUNNING],
+            SQL_PARAMS_NAMED
+        );
+        $params['type'] = self::TYPE_AUTORESTORE;
+        $rows = $DB->get_records_select(self::TABLE, "type = :type AND status $insql", $params, '', 'id, payload');
+        $fileids = [];
+        foreach ($rows as $row) {
+            $payload = json_decode((string) $row->payload, true);
+            if (
+                is_array($payload)
+                && ($payload['sourcetype'] ?? '') === backup_source::TYPE_STORED
+                && !empty($payload['fileid'])
+            ) {
+                $fileids[] = (int) $payload['fileid'];
+            }
+        }
+        return $fileids;
+    }
+
+    /**
      * A user's own transfers, newest first.
      *
      * @param int $userid The owning user's id.
