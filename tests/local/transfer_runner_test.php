@@ -1050,6 +1050,25 @@ final class transfer_runner_test extends \advanced_testcase {
             'progress' => 0,
             'controller' => '',
         ]);
+        // An activity backup's restore records the course it restores into too.
+        $activitycontrollerid = $DB->insert_record('backup_controllers', (object) [
+            'backupid' => md5('stuckactivity'),
+            'operation' => 'restore',
+            'type' => 'activity',
+            'itemid' => (int) $placeholder->id,
+            'format' => 'moodle2',
+            'interactive' => 1,
+            'purpose' => 10,
+            'userid' => (int) $admin->id,
+            'status' => 800,
+            'execution' => 1,
+            'executiontime' => 0,
+            'checksum' => md5('stuckactivity'),
+            'timecreated' => time(),
+            'timemodified' => time(),
+            'progress' => 0,
+            'controller' => '',
+        ]);
         // The upload is gone, so the fresh attempt fails once the old course is cleared.
         $token = 'gone';
         $id = transfer_manager::create(
@@ -1065,6 +1084,7 @@ final class transfer_runner_test extends \advanced_testcase {
         $sink->close();
 
         $this->assertEquals(900, (int) $DB->get_field('backup_controllers', 'status', ['id' => $controllerid]));
+        $this->assertEquals(900, (int) $DB->get_field('backup_controllers', 'status', ['id' => $activitycontrollerid]));
         $this->assertFalse($DB->record_exists('course', ['id' => $placeholder->id]));
         $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
     }

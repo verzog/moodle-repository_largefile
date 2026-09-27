@@ -820,7 +820,9 @@ class transfer_runner {
      * A restore controller that did not finish (a worker that died, or a restore
      * that threw before recording its outcome) is left as unfinished in
      * {backup_controllers}, and Moodle 5.3+ refuses to delete a course while one
-     * is, so it is marked failed first. Only restore controllers targeting this
+     * is, so it is marked failed first — whatever the backup's type: a restore
+     * controller records the course it restores into as its item, for a course,
+     * section or activity backup alike. Only restore controllers targeting this
      * course are touched: the placeholder was created by this job alone, and the
      * scheduled-task lock means no other worker is still running it.
      *
@@ -837,10 +839,9 @@ class transfer_runner {
             'backup_controllers',
             'status',
             \backup::STATUS_FINISHED_ERR,
-            'operation = :operation AND type = :type AND itemid = :itemid AND status < :finished',
+            'operation = :operation AND itemid = :itemid AND status < :finished',
             [
                 'operation' => 'restore',
-                'type' => \backup::TYPE_1COURSE,
                 'itemid' => $courseid,
                 'finished' => \backup::STATUS_FINISHED_ERR,
             ]
