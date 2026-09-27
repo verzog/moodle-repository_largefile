@@ -2,6 +2,24 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.8.2 — 2026-09-27
+
+- **Progress percentage for an automatic restore.** While "Restore automatically
+  into a new course" runs, the transfer queue now shows how far it has got —
+  "Unpacking the backup · 12%" and then "Restoring into a new course · 47%" —
+  alongside how long it has been running. Unpacking the backup is the first 20%;
+  the restore itself reports into the rest, the same progress Moodle's own restore
+  records.
+- **A failed automatic restore no longer leaves a course that cannot be deleted.**
+  When a restore failed part-way, its restore record was left marked as still
+  running and its unfinished "Course restoration in progress" (shortname
+  "restoring") course stayed behind; on Moodle 5.3, deleting that course was then
+  refused with "There is an existing backup or restore process for this course
+  that needs to complete." A failed restore is now marked failed, as Moodle's own
+  asynchronous restore does, and its unfinished course is removed. A retry after
+  an interrupted run clears any such leftover record before removing the old
+  course, and stops rather than restoring a second course if Moodle still refuses.
+
 ## 0.8.1 — 2026-09-27
 
 - **"Send to…" no longer times out on a large upload.** Sending a completed upload

@@ -42,6 +42,12 @@ namespace repository_largefile\local;
  */
 class transfer_runner {
     /**
+     * @var int Share of an automatic restore's progress given to unpacking the
+     * backup; the restore itself takes the rest.
+     */
+    public const AUTORESTORE_UNPACK_PERCENT = 20;
+
+    /**
      * Run one transfer, recording success or failure on its row.
      *
      * @param \stdClass $transfer The transfer row to execute.
@@ -808,6 +814,44 @@ class transfer_runner {
     }
 
     /**
+     * Remove the placeholder course an automatic restore created, after the restore
+     * failed or was interrupted.
+     *
+     * A restore controller that did not finish (a worker that died, or a restore
+     * that threw before recording its outcome) is left as unfinished in
+     * {backup_controllers}, and Moodle 5.3+ refuses to delete a course while one
+     * is, so it is marked failed first — whatever the backup's type: a restore
+     * controller records the course it restores into as its item, for a course,
+     * section or activity backup alike. Only restore controllers targeting this
+     * course are touched: the placeholder was created by this job alone, and the
+     * scheduled-task lock means no other worker is still running it.
+     *
+     * @param int $courseid The placeholder course.
+     * @return void
+     * @throws \moodle_exception If Moodle still refuses to delete the course.
+     */
+    private static function discard_placeholder_course(int $courseid): void {
+        global $DB;
+        if (!$DB->record_exists('course', ['id' => $courseid])) {
+            return;
+        }
+        $DB->set_field_select(
+            'backup_controllers',
+            'status',
+            \backup::STATUS_FINISHED_ERR,
+            'operation = :operation AND itemid = :itemid AND status < :finished',
+            [
+                'operation' => 'restore',
+                'itemid' => $courseid,
+                'finished' => \backup::STATUS_FINISHED_ERR,
+            ]
+        );
+        if (delete_course($courseid, false) === false) {
+            throw new \moodle_exception('errorrestorecourseleft', 'repository_largefile', '', $courseid);
+        }
+    }
+
+    /**
      * Restore a completed chunked upload (.mbz) unattended into a new course in a
      * chosen category, with the site's default restore settings.
      *
@@ -859,7 +903,7 @@ class transfer_runner {
                 return (string) $earliercourseid;
             }
             // A half-restored course: remove it and restore from scratch.
-            delete_course($earliercourseid, false);
+            self::discard_placeholder_course($earliercourseid);
         }
 
         $user = \core_user::get_user($userid, '*', MUST_EXIST);
@@ -890,7 +934,13 @@ class transfer_runner {
                 }
                 transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
                 $packer = get_file_packer('application/vnd.moodle.backup');
-                if (!$packer->extract_to_pathname($srcpath, $path)) {
+                // Unpacking is the first slice of the transfer's progress.
+                $unpacking = new \repository_largefile\local\progress\extract_progress(
+                    (int) $transfer->id,
+                    0,
+                    self::AUTORESTORE_UNPACK_PERCENT
+                );
+                if (!$packer->extract_to_pathname($srcpath, $path, null, $unpacking)) {
                     throw new \moodle_exception('errorrestoreextract', 'repository_largefile');
                 }
             } finally {
@@ -917,6 +967,13 @@ class transfer_runner {
                 if ($rc->get_status() == \backup::STATUS_REQUIRE_CONV) {
                     $rc->convert();
                 }
+                // The restore itself is the rest of the transfer's progress (short of
+                // 100%, which marks the whole job done).
+                $rc->set_progress(new \repository_largefile\local\progress\restore_progress(
+                    (int) $transfer->id,
+                    self::AUTORESTORE_UNPACK_PERCENT,
+                    99
+                ));
                 if (!$rc->execute_precheck()) {
                     $results = $rc->get_precheck_results();
                     throw new \moodle_exception(
@@ -930,8 +987,27 @@ class transfer_runner {
                 $isfullcourse = $rc->get_type() === \backup::TYPE_1COURSE;
                 $info = $rc->get_info();
             } catch (\Throwable $e) {
-                // Do not leave the empty placeholder course behind.
-                delete_course($courseid, false);
+                // Mark the restore failed, as core's asynchronous restore does: left
+                // as "executing", Moodle 5.3+ would refuse to ever delete the course
+                // ("there is an existing backup or restore process"). Then remove the
+                // placeholder course so it is not left behind half-restored.
+                if ($rc && $rc->get_status() < \backup::STATUS_FINISHED_ERR) {
+                    try {
+                        $rc->set_status(\backup::STATUS_FINISHED_ERR);
+                    } catch (\Throwable $ignored) {
+                        // The sweep in discard_placeholder_course() covers it.
+                        unset($ignored);
+                    }
+                }
+                try {
+                    self::discard_placeholder_course((int) $courseid);
+                } catch (\Throwable $cleanup) {
+                    debugging(
+                        'repository_largefile: could not remove the placeholder course ' . $courseid
+                            . ' after a failed restore: ' . $cleanup->getMessage(),
+                        DEBUG_NORMAL
+                    );
+                }
                 throw $e;
             } finally {
                 if ($rc) {
