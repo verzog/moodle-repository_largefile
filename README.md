@@ -246,7 +246,8 @@ never hits a web-request timeout:
   into a new course in the chosen category (the site's default category is
   preselected) with the site's default restore settings, and you are notified with
   a link to the course when it finishes. It unpacks the backup straight from the
-  upload, so it needs no second full-size copy in the file store. It requires
+  upload, so it needs no second full-size copy in the file store. The transfer
+  queue shows its progress as a percentage while it runs. It requires
   `moodle/course:create` and `moodle/restore:restorecourse` in the category.
 
 **Send to…** (the other action under *Completed uploads*) works the same way: the

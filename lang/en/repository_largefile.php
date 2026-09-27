@@ -78,6 +78,8 @@ $string['errorpeernourl'] = 'This peer has no Site URL, so its connection cannot
 $string['errorpickerdisabled'] = 'Uploads to the large file picker are disabled on this site.';
 $string['errorrestorebusy'] = 'That completed upload is busy with another action (Send to…, Remove or another restore). '
     . 'Try again shortly.';
+$string['errorrestorecourseleft'] = 'The restore failed, and its unfinished course (id {$a}) could not be removed '
+    . 'automatically. Delete it from Course management.';
 $string['errorrestoreextract'] = 'The backup file could not be unpacked. It may be incomplete or not a Moodle backup.';
 $string['errorrestoremodeunavailable'] = 'Restoring this upload is not available: the course backup area destination is '
     . 'disabled and you may not create a course in any category.';
@@ -253,6 +255,7 @@ $string['restorequeued'] = '"{$a}" has been queued to be copied into the course 
     . '(it starts within about five minutes); when it is ready you will be sent a notification, and a "Continue to '
     . 'restore" link appears in the transfer queue below. You can close this page.';
 $string['restorerunning'] = 'Restoring into a new course';
+$string['restoreunpacking'] = 'Unpacking the backup';
 $string['restoreviewcourse'] = 'View the restored course';
 $string['resumeprompt'] = 'You have an unfinished upload of "{$a->filename}" ({$a->percent}% done). Re-select that '
     . 'file to carry on where you left off, or choose a different file to start over.';

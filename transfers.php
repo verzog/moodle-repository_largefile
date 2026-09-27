@@ -612,8 +612,22 @@ if ($transfers) {
                         import_policy::destination_label((string) (transfer_manager::payload($transfer)['destination'] ?? ''))
                     ),
                 ];
-                $outcome = $steps[$transfer->type] . ' · '
-                    . get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted));
+                $parts = [$steps[$transfer->type]];
+                if ($transfer->type === transfer_manager::TYPE_AUTORESTORE) {
+                    // An automatic restore reports a percentage: unpacking the backup
+                    // is the first slice of it, then the restore itself.
+                    $percent = (int) $transfer->progress;
+                    if ($percent < \repository_largefile\local\transfer_runner::AUTORESTORE_UNPACK_PERCENT) {
+                        $parts = [get_string('restoreunpacking', 'repository_largefile')];
+                    }
+                    $parts[] = $percent . '%';
+                }
+                $parts[] = get_string(
+                    'transferrunningfor',
+                    'repository_largefile',
+                    format_time(time() - (int) $transfer->timestarted)
+                );
+                $outcome = implode(' · ', $parts);
             } else {
                 $outcome = $transfer->timestarted
                     ? get_string('transferrunningfor', 'repository_largefile', format_time(time() - (int) $transfer->timestarted))

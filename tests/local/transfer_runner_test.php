@@ -972,4 +972,100 @@ final class transfer_runner_test extends \advanced_testcase {
         $this->assertNotNull($url);
         $this->assertEquals(\context_course::instance($course->id)->id, $url->get_param('contextid'));
     }
+
+    /**
+     * A restore's progress is recorded on its transfer as a percentage, mapped into
+     * the restore's slice of it, and reaches the top of that slice when it ends.
+     *
+     * @return void
+     */
+    public function test_restore_progress_recorded_on_transfer(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_AUTORESTORE, 2, ['token' => 'x', 'categoryid' => 1]);
+        $this->assertTrue(transfer_manager::claim($id));
+
+        $progress = new \repository_largefile\local\progress\restore_progress($id, 20, 99, 0);
+        $progress->start_progress('Restoring', 10);
+        $progress->progress(5);
+        $this->assertEquals(59, (int) transfer_manager::get($id)->progress);
+        $progress->end_progress();
+        $this->assertEquals(99, (int) transfer_manager::get($id)->progress);
+    }
+
+    /**
+     * Unpacking progress fills the first slice of the transfer's percentage, and the
+     * percentage never moves backwards.
+     *
+     * @return void
+     */
+    public function test_extract_progress_recorded_on_transfer(): void {
+        $this->resetAfterTest(true);
+        $id = transfer_manager::create(transfer_manager::TYPE_AUTORESTORE, 2, ['token' => 'x', 'categoryid' => 1]);
+        $this->assertTrue(transfer_manager::claim($id));
+
+        $progress = new \repository_largefile\local\progress\extract_progress($id, 0, 20, 0);
+        $progress->progress(50, 100);
+        $this->assertEquals(10, (int) transfer_manager::get($id)->progress);
+        $progress->progress(25, 100);
+        $this->assertEquals(10, (int) transfer_manager::get($id)->progress);
+        $progress->progress(\file_progress::INDETERMINATE, \file_progress::INDETERMINATE);
+        $this->assertEquals(10, (int) transfer_manager::get($id)->progress);
+        $progress->progress(100, 100);
+        $this->assertEquals(20, (int) transfer_manager::get($id)->progress);
+    }
+
+    /**
+     * A retried automatic restore whose earlier attempt left its placeholder course
+     * with an unfinished restore controller marks that controller failed and removes
+     * the course, rather than leaving a course Moodle refuses to delete ("there is an
+     * existing backup or restore process") or restoring a second course.
+     *
+     * @return void
+     */
+    public function test_auto_restore_retry_clears_stuck_restore_controller(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        // Delete synchronously, so the course is gone when the job returns.
+        set_config('enablecourseasyncdeletion', 0, 'moodlecourse');
+        $admin = get_admin();
+        $category = $this->getDataGenerator()->create_category();
+        $placeholder = $this->getDataGenerator()->create_course(['category' => $category->id]);
+        $controllerid = $DB->insert_record('backup_controllers', (object) [
+            'backupid' => md5('stuck'),
+            'operation' => 'restore',
+            'type' => 'course',
+            'itemid' => (int) $placeholder->id,
+            'format' => 'moodle2',
+            'interactive' => 1,
+            'purpose' => 10,
+            'userid' => (int) $admin->id,
+            'status' => 800,
+            'execution' => 1,
+            'executiontime' => 0,
+            'checksum' => md5('stuck'),
+            'timecreated' => time(),
+            'timemodified' => time(),
+            'progress' => 0,
+            'controller' => '',
+        ]);
+        // The upload is gone, so the fresh attempt fails once the old course is cleared.
+        $token = 'gone';
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $admin->id,
+            ['token' => $token, 'categoryid' => (int) $category->id, 'courseid' => (int) $placeholder->id],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            'broken.mbz'
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $this->assertEquals(900, (int) $DB->get_field('backup_controllers', 'status', ['id' => $controllerid]));
+        $this->assertFalse($DB->record_exists('course', ['id' => $placeholder->id]));
+        $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
+    }
 }
