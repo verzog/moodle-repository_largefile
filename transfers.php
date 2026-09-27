@@ -31,6 +31,7 @@ use repository_largefile\local\transfer_manager;
 use repository_largefile\local\manage_page;
 use repository_largefile\form\completed_restore_form;
 use repository_largefile\form\completed_send_form;
+use repository_largefile\form\stored_restore_form;
 use repository_largefile\form\transfer_form;
 
 // Repository plugins are not part of the admin settings tree, so this page stands
@@ -389,6 +390,87 @@ if ($action === 'restorecompleted') {
     echo $OUTPUT->footer();
     exit;
 }
+// Restore a course backup that is already held in Moodle (the operator's backup area
+// or private files, or a course backup area they may download from) into a new
+// course, unattended in the background — so a backup already on the site never has
+// to be uploaded again, nor restored through the wizard, whose steps time out on a
+// very large backup. The backup itself is left where it is.
+if ($action === 'restorestored') {
+    require_sesskey();
+    $sources = \repository_largefile\local\backup_source::restorable_backups((int) $USER->id);
+    if (!$sources || !completed_restore_form::auto_restore_categories()) {
+        redirect($baseurl, get_string('restorestorednone', 'repository_largefile'));
+    }
+    $form = new stored_restore_form(
+        new moodle_url($baseurl, ['action' => 'restorestored']),
+        ['sources' => $sources]
+    );
+    if ($form->is_cancelled()) {
+        redirect($baseurl);
+    }
+    if ($data = $form->get_data()) {
+        // Re-derive the operator's right to the file from the file itself.
+        $fileid = preg_match('/^stored:(\d+)$/', (string) $data->source, $m) ? (int) $m[1] : 0;
+        $file = \repository_largefile\local\backup_source::authorize_stored($fileid, (int) $USER->id);
+        if (!$file || import_policy::detect_type($file->get_filename()) !== import_policy::TYPE_BACKUP) {
+            redirect(
+                $baseurl,
+                get_string('errorrestorenofile', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        $categoryid = (int) $data->categoryid;
+        // One restore of a given backup at a time, decided under a lock so a
+        // double-submitted form cannot queue two.
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $lockfactory->get_lock('stored' . $fileid, 10);
+        if (!$lock) {
+            redirect(
+                $baseurl,
+                get_string('errorrestorebusy', 'repository_largefile'),
+                null,
+                \core\output\notification::NOTIFY_ERROR
+            );
+        }
+        try {
+            $alreadyqueued = in_array($fileid, transfer_manager::active_stored_restore_fileids(), true);
+            if (!$alreadyqueued) {
+                transfer_manager::create(
+                    transfer_manager::TYPE_AUTORESTORE,
+                    (int) $USER->id,
+                    [
+                        'sourcetype' => \repository_largefile\local\backup_source::TYPE_STORED,
+                        'fileid' => $fileid,
+                        'categoryid' => $categoryid,
+                        'filesize' => (int) $file->get_filesize(),
+                    ],
+                    0,
+                    \context_coursecat::instance($categoryid)->id,
+                    (string) $file->get_filename()
+                );
+            }
+        } finally {
+            $lock->release();
+        }
+        if ($alreadyqueued) {
+            redirect($baseurl, get_string('restorestoredalready', 'repository_largefile'));
+        }
+        redirect(
+            $baseurl,
+            get_string('restoreautoqueued', 'repository_largefile', format_string($file->get_filename())),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
+    }
+    echo $OUTPUT->header();
+    echo manage_page::tabs('transfers');
+    echo $OUTPUT->heading(get_string('restorestoredheading', 'repository_largefile'));
+    echo html_writer::tag('p', get_string('restorestored_desc', 'repository_largefile'), ['class' => 'text-muted']);
+    $form->display();
+    echo $OUTPUT->footer();
+    exit;
+}
 // Remove a single completed-but-unselected upload (a staged file the owner uploaded
 // but never picked into an activity), to reclaim its disk. delete_in_state() locks
 // and confirms the row is still completed before deleting.
@@ -524,6 +606,19 @@ if ($showcompleted) {
         html_writer::link(
             new moodle_url($baseurl, ['showcompleted' => 1]),
             get_string('showcompleteduploads', 'repository_largefile', $completedcount)
+        ),
+        'mb-3'
+    );
+}
+
+// Restore a backup already held in Moodle, offered to an operator who may create a
+// course somewhere (the page lists only backups they may use).
+if (completed_restore_form::auto_restore_categories()) {
+    echo html_writer::div(
+        html_writer::link(
+            new moodle_url($baseurl, ['action' => 'restorestored', 'sesskey' => sesskey()]),
+            get_string('restorestored', 'repository_largefile'),
+            ['class' => 'btn btn-secondary']
         ),
         'mb-3'
     );

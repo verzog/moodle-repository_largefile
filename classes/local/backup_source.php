@@ -128,6 +128,26 @@ class backup_source {
     }
 
     /**
+     * Course backups (.mbz) already held in Moodle that a user may restore from, as
+     * menu options: their own backup area and private files, then course backup
+     * areas they may download from. Offered by "Restore an existing backup", so a
+     * backup that is already on the server never has to be uploaded again.
+     *
+     * @param int $userid The user restoring.
+     * @return array Map of "stored:fileid" => label.
+     */
+    public static function restorable_backups(int $userid): array {
+        $options = [];
+        foreach (self::existing_backups($userid) as $value => $label) {
+            $file = self::authorize_stored((int) substr($value, strlen(self::TYPE_STORED) + 1), $userid);
+            if ($file && import_policy::detect_type($file->get_filename()) === import_policy::TYPE_BACKUP) {
+                $options[$value] = $label;
+            }
+        }
+        return $options;
+    }
+
+    /**
      * Load a stored file by id, but only if the user is entitled to share it.
      *
      * Permission is derived from the file's own location, not from anything the
@@ -259,7 +279,6 @@ class backup_source {
             'component' => 'backup',
             'filearea' => 'course',
         ]);
-        $origin = get_string('sourcecoursebackup', 'repository_largefile');
         $options = [];
         $examined = 0;
         foreach ($rs as $row) {
@@ -271,6 +290,8 @@ class backup_source {
                 continue;
             }
             $value = self::TYPE_STORED . ':' . $row->id;
+            // Name the course: with many courses, "Course backup" alone is ambiguous.
+            $origin = get_string('sourcecoursebackupof', 'repository_largefile', $context->get_context_name(false, true));
             $options[$value] = self::label((string) $row->filename, (int) $row->filesize, $origin);
             if (count($options) >= self::MENU_LIMIT) {
                 break;

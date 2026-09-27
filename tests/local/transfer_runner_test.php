@@ -1088,4 +1088,164 @@ final class transfer_runner_test extends \advanced_testcase {
         $this->assertFalse($DB->record_exists('course', ['id' => $placeholder->id]));
         $this->assertSame(transfer_manager::STATUS_FAILED, transfer_manager::get($id)->status);
     }
+
+    /**
+     * Back up a course the way Moodle does by default, leaving the backup in that
+     * course's backup area.
+     *
+     * @param \stdClass $course The course to back up.
+     * @param int $userid The user running the backup.
+     * @return \stored_file The backup file.
+     */
+    private function make_course_backup(\stdClass $course, int $userid): \stored_file {
+        global $CFG;
+        require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');
+        $bc = new \backup_controller(
+            \backup::TYPE_1COURSE,
+            $course->id,
+            \backup::FORMAT_MOODLE,
+            \backup::INTERACTIVE_NO,
+            \backup::MODE_GENERAL,
+            $userid
+        );
+        $bc->execute_plan();
+        $file = $bc->get_results()['backup_destination'];
+        $bc->destroy();
+        return $file;
+    }
+
+    /**
+     * An automatic restore of a backup already held in a course's backup area
+     * restores it into a new course in the chosen category and leaves the backup
+     * where it was.
+     *
+     * @return void
+     */
+    public function test_auto_restore_from_stored_backup(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $admin = get_admin();
+        $generator = $this->getDataGenerator();
+        $source = $generator->create_course(['fullname' => 'Stored source', 'shortname' => 'STORED']);
+        $generator->create_module('page', ['course' => $source->id, 'name' => 'Stored page']);
+        $category = $generator->create_category();
+        $backup = $this->make_course_backup($source, (int) $admin->id);
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $admin->id,
+            [
+                'sourcetype' => backup_source::TYPE_STORED,
+                'fileid' => (int) $backup->get_id(),
+                'categoryid' => (int) $category->id,
+            ],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            $backup->get_filename()
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_COMPLETED, $transfer->status, (string) $transfer->error);
+        $newcourse = $DB->get_record('course', ['id' => (int) $transfer->result], '*', MUST_EXIST);
+        $this->assertEquals((int) $category->id, (int) $newcourse->category);
+        $this->assertTrue($DB->record_exists('page', ['course' => $newcourse->id, 'name' => 'Stored page']));
+        $this->assertNotFalse(get_file_storage()->get_file_by_id($backup->get_id()), 'The backup must be kept.');
+        $this->assertCount(1, $messages);
+    }
+
+    /**
+     * An automatic restore of a stored backup the operator may not download fails,
+     * without creating a course.
+     *
+     * @return void
+     */
+    public function test_auto_restore_from_stored_backup_not_permitted(): void {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->enable_repository();
+        $this->setAdminUser();
+        $generator = $this->getDataGenerator();
+        $source = $generator->create_course();
+        $category = $generator->create_category();
+        $backup = $this->make_course_backup($source, (int) get_admin()->id);
+
+        // May create and restore courses, but not download this course's backups.
+        $operator = $generator->create_user();
+        $systemcontext = \context_system::instance();
+        $roleid = $generator->create_role();
+        foreach (['repository/largefile:import', 'moodle/course:create', 'moodle/restore:restorecourse'] as $cap) {
+            assign_capability($cap, CAP_ALLOW, $roleid, $systemcontext->id);
+        }
+        role_assign($roleid, $operator->id, $systemcontext->id);
+        $coursecount = $DB->count_records('course');
+
+        $id = transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $operator->id,
+            [
+                'sourcetype' => backup_source::TYPE_STORED,
+                'fileid' => (int) $backup->get_id(),
+                'categoryid' => (int) $category->id,
+            ],
+            0,
+            \context_coursecat::instance($category->id)->id,
+            $backup->get_filename()
+        );
+        $sink = $this->redirectMessages();
+        transfer_runner::run(transfer_manager::get($id));
+        $sink->close();
+
+        $transfer = transfer_manager::get($id);
+        $this->assertSame(transfer_manager::STATUS_FAILED, $transfer->status);
+        $this->assertSame(get_string('errorrestorenofile', 'repository_largefile'), $transfer->error);
+        $this->assertSame($coursecount, $DB->count_records('course'));
+    }
+
+    /**
+     * Only course backups are offered for "Restore an existing backup", and a
+     * queued restore of one is reported so it is not queued twice.
+     *
+     * @return void
+     */
+    public function test_restorable_backups_and_active_stored_restores(): void {
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+        $admin = get_admin();
+        $usercontext = \context_user::instance($admin->id);
+        $fs = get_file_storage();
+        $mbz = $fs->create_file_from_string([
+            'contextid' => $usercontext->id,
+            'component' => 'user',
+            'filearea' => 'backup',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'course.mbz',
+        ], 'DATA');
+        $pdf = $fs->create_file_from_string([
+            'contextid' => $usercontext->id,
+            'component' => 'user',
+            'filearea' => 'private',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'notes.pdf',
+        ], 'DATA');
+
+        $options = backup_source::restorable_backups((int) $admin->id);
+        $this->assertArrayHasKey('stored:' . $mbz->get_id(), $options);
+        $this->assertArrayNotHasKey('stored:' . $pdf->get_id(), $options);
+
+        $this->assertSame([], transfer_manager::active_stored_restore_fileids());
+        transfer_manager::create(
+            transfer_manager::TYPE_AUTORESTORE,
+            (int) $admin->id,
+            ['sourcetype' => backup_source::TYPE_STORED, 'fileid' => (int) $mbz->get_id(), 'categoryid' => 1]
+        );
+        $this->assertSame([(int) $mbz->get_id()], transfer_manager::active_stored_restore_fileids());
+    }
 }

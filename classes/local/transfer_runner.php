@@ -814,6 +814,85 @@ class transfer_runner {
     }
 
     /**
+     * Unpack a completed chunked upload for an automatic restore.
+     *
+     * Runs under the same per-token lock the Transfers page actions take, so the
+     * source cannot be moved or removed mid-read; the restore itself then works from
+     * the unpacked copy and needs no lock.
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param string $token The upload's token.
+     * @param string $path The backup temp directory to unpack into.
+     * @param \file_progress $progress Unpacking progress callback.
+     * @return void
+     * @throws \moodle_exception If the upload is gone, busy, not a backup or unreadable.
+     */
+    private static function unpack_upload(\stdClass $transfer, string $token, string $path, \file_progress $progress): void {
+        $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
+        $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
+        if (!$lock) {
+            throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
+        }
+        try {
+            $record = \repository_largefile\chunk_store::get_record($token);
+            if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
+                throw new \moodle_exception('completeduploadgone', 'repository_largefile');
+            }
+            $srcpath = \repository_largefile\chunk_store::get_path_for_id($record->id);
+            if (!$srcpath || !is_file($srcpath)) {
+                throw new \moodle_exception('completeduploadnofile', 'repository_largefile');
+            }
+            if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
+                throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
+            }
+            transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
+            $packer = get_file_packer('application/vnd.moodle.backup');
+            if (!$packer->extract_to_pathname($srcpath, $path, null, $progress)) {
+                throw new \moodle_exception('errorrestoreextract', 'repository_largefile');
+            }
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Unpack a backup already held in Moodle for an automatic restore.
+     *
+     * The operator's right to the file is re-derived from the file itself (its own
+     * backup area or private files, or a course backup area they may download from),
+     * as the job runs unattended. The file is read where it is stored — no copy of a
+     * very large backup is made first — and is never changed or removed.
+     *
+     * @param \stdClass $transfer The transfer row.
+     * @param array $payload Decoded payload; expects 'fileid'.
+     * @param string $path The backup temp directory to unpack into.
+     * @param \file_progress $progress Unpacking progress callback.
+     * @return void
+     * @throws \moodle_exception If the backup is gone, not permitted or unreadable.
+     */
+    private static function unpack_stored_backup(
+        \stdClass $transfer,
+        array $payload,
+        string $path,
+        \file_progress $progress
+    ): void {
+        $file = backup_source::authorize_stored((int) ($payload['fileid'] ?? 0), (int) $transfer->userid);
+        if (!$file || import_policy::detect_type($file->get_filename()) !== import_policy::TYPE_BACKUP) {
+            throw new \moodle_exception('errorrestorenofile', 'repository_largefile');
+        }
+        transfer_manager::set_filename((int) $transfer->id, $file->get_filename());
+        // The file's path in the file pool (fetched first from a remote file system).
+        $srcpath = get_file_storage()->get_file_system()->get_local_path_from_storedfile($file, true);
+        if (!$srcpath || !is_readable($srcpath)) {
+            throw new \moodle_exception('errorrestorenofile', 'repository_largefile');
+        }
+        $packer = get_file_packer('application/vnd.moodle.backup');
+        if (!$packer->extract_to_pathname($srcpath, $path, null, $progress)) {
+            throw new \moodle_exception('errorrestoreextract', 'repository_largefile');
+        }
+    }
+
+    /**
      * Remove the placeholder course an automatic restore created, after the restore
      * failed or was interrupted.
      *
@@ -852,8 +931,10 @@ class transfer_runner {
     }
 
     /**
-     * Restore a completed chunked upload (.mbz) unattended into a new course in a
-     * chosen category, with the site's default restore settings.
+     * Restore a course backup (.mbz) unattended into a new course in a chosen
+     * category, with the site's default restore settings. The backup is either a
+     * completed chunked upload, or (payload 'sourcetype' "stored") a backup already
+     * held in Moodle, which is read in place and left untouched.
      *
      * Mirrors core's admin/cli/restore_backup.php. The backup is unpacked straight
      * from the staged upload into the backup temp directory — no copy into the file
@@ -869,7 +950,8 @@ class transfer_runner {
      * finished — just finishes up, so it never restores a second course.
      *
      * @param \stdClass $transfer The transfer row.
-     * @param array $payload Decoded payload; expects 'token' and 'categoryid'.
+     * @param array $payload Decoded payload; expects 'categoryid', and either 'token'
+     *        or 'sourcetype' "stored" with 'fileid'.
      * @return string The new course's id.
      * @throws \moodle_exception If the upload is gone, the operator lacks the rights,
      *         or the restore's prechecks fail.
@@ -891,15 +973,21 @@ class transfer_runner {
             throw new \moodle_exception('errornocategorycap', 'repository_largefile');
         }
 
+        // The source is either a completed chunked upload (consumed once restored) or
+        // a backup already held in Moodle (read in place and always left alone).
+        $fromstored = ($payload['sourcetype'] ?? '') === backup_source::TYPE_STORED;
+
         // Checkpoints from an earlier, interrupted attempt.
         $earliercourseid = (int) ($payload['courseid'] ?? 0);
         if ($earliercourseid > 0 && $DB->record_exists('course', ['id' => $earliercourseid])) {
             if (!empty($payload['restored'])) {
                 // The restore finished; only the clean-up of the upload was missed.
-                \repository_largefile\chunk_store::delete_in_state(
-                    $token,
-                    \repository_largefile\chunk_store::STATE_COMPLETED
-                );
+                if (!$fromstored) {
+                    \repository_largefile\chunk_store::delete_in_state(
+                        $token,
+                        \repository_largefile\chunk_store::STATE_COMPLETED
+                    );
+                }
                 return (string) $earliercourseid;
             }
             // A half-restored course: remove it and restore from scratch.
@@ -912,39 +1000,16 @@ class transfer_runner {
         $backupdir = \restore_controller::get_tempdir_name(SITEID, $userid);
         $path = make_backup_temp_directory($backupdir);
         try {
-            // Unpack under the same per-token lock the Transfers page actions take, so
-            // the source cannot be moved or removed mid-read; the restore itself then
-            // works from the unpacked copy and needs no lock.
-            $lockfactory = \core\lock\lock_config::get_lock_factory('repository_largefile_bg');
-            $lock = $token !== '' ? $lockfactory->get_lock($token, 60) : false;
-            if (!$lock) {
-                throw new \moodle_exception('errorrestorebusy', 'repository_largefile');
-            }
-            try {
-                $record = \repository_largefile\chunk_store::get_record($token);
-                if (!$record || (int) $record->state !== \repository_largefile\chunk_store::STATE_COMPLETED) {
-                    throw new \moodle_exception('completeduploadgone', 'repository_largefile');
-                }
-                $srcpath = \repository_largefile\chunk_store::get_path_for_id($record->id);
-                if (!$srcpath || !is_file($srcpath)) {
-                    throw new \moodle_exception('completeduploadnofile', 'repository_largefile');
-                }
-                if (import_policy::detect_type((string) $record->filename) !== import_policy::TYPE_BACKUP) {
-                    throw new \moodle_exception('errorrestorenotbackup', 'repository_largefile');
-                }
-                transfer_manager::set_filename((int) $transfer->id, (string) $record->filename);
-                $packer = get_file_packer('application/vnd.moodle.backup');
-                // Unpacking is the first slice of the transfer's progress.
-                $unpacking = new \repository_largefile\local\progress\extract_progress(
-                    (int) $transfer->id,
-                    0,
-                    self::AUTORESTORE_UNPACK_PERCENT
-                );
-                if (!$packer->extract_to_pathname($srcpath, $path, null, $unpacking)) {
-                    throw new \moodle_exception('errorrestoreextract', 'repository_largefile');
-                }
-            } finally {
-                $lock->release();
+            // Unpacking is the first slice of the transfer's progress.
+            $unpacking = new \repository_largefile\local\progress\extract_progress(
+                (int) $transfer->id,
+                0,
+                self::AUTORESTORE_UNPACK_PERCENT
+            );
+            if ($fromstored) {
+                self::unpack_stored_backup($transfer, $payload, $path, $unpacking);
+            } else {
+                self::unpack_upload($transfer, $token, $path, $unpacking);
             }
 
             [$fullname, $shortname] = \restore_dbops::calculate_course_names(
@@ -1040,8 +1105,14 @@ class transfer_runner {
             }
         }
 
-        // The restore succeeded, so the staged upload has served its purpose.
-        \repository_largefile\chunk_store::delete_in_state($token, \repository_largefile\chunk_store::STATE_COMPLETED);
+        // The restore succeeded, so a staged upload has served its purpose. A backup
+        // already held in Moodle is the operator's to keep, so it is left alone.
+        if (!$fromstored) {
+            \repository_largefile\chunk_store::delete_in_state(
+                $token,
+                \repository_largefile\chunk_store::STATE_COMPLETED
+            );
+        }
         return (string) $courseid;
     }
 }
