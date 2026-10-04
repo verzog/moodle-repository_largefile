@@ -2,6 +2,13 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## 0.8.4 — 2026-10-04
+
+- **Moodle 5.3 LTS supported.** The plugin now declares support for Moodle 5.0 to
+  5.3, and CI tests every change against Moodle 5.3 (PHP 8.3 and 8.4, on
+  PostgreSQL, MariaDB and MySQL) as well as 5.0-5.2. The CI database services move
+  to PostgreSQL 17 and MariaDB 11.4, the minimums Moodle 5.3 requires.
+
 ## 0.8.3 — 2026-09-27
 
 - **Restore an existing backup.** A new **Restore an existing backup…** button on
