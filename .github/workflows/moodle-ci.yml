@@ -15,8 +15,11 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # PostgreSQL 17 and MariaDB 11.4 are the minimums for Moodle 5.3, and above
+      # the minimums of 5.0-5.2 (PostgreSQL 14, MariaDB 10.11), so one set of
+      # services serves the whole matrix.
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -27,15 +30,16 @@ jobs:
           --health-cmd="pg_isready" --health-interval=10s
           --health-timeout=5s --health-retries=3
       mariadb:
-        image: mariadb:10.11
+        image: mariadb:11.4
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: true
           MYSQL_CHARACTER_SET_SERVER: utf8mb4
           MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
         ports:
           - 3306:3306
+        # MariaDB 11 images no longer ship the mysqladmin alias, only mariadb-admin.
         options: >-
-          --health-cmd="mysqladmin ping" --health-interval=10s
+          --health-cmd="mariadb-admin ping" --health-interval=10s
           --health-timeout=5s --health-retries=3
       mysql:
         image: mysql:8.4
@@ -53,15 +57,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Moodle 5.0/5.1 run on PHP 8.2-8.4; Moodle 5.2 dropped 8.2 (8.3-8.4 only).
+        # Moodle 5.0/5.1 run on PHP 8.2-8.4; Moodle 5.2 and 5.3 LTS dropped 8.2
+        # (8.3-8.4 only).
         php: ['8.2', '8.3', '8.4']
-        moodle-branch: ['MOODLE_500_STABLE', 'MOODLE_501_STABLE', 'MOODLE_502_STABLE']
-        # mysqli -> MySQL 8.4 service (port 3307); mariadb -> MariaDB 10.11 (3306).
+        moodle-branch: ['MOODLE_500_STABLE', 'MOODLE_501_STABLE', 'MOODLE_502_STABLE', 'MOODLE_503_STABLE']
+        # mysqli -> MySQL 8.4 service (port 3307); mariadb -> MariaDB 11.4 (3306).
         database: ['pgsql', 'mariadb', 'mysqli']
         exclude:
-          # Moodle 5.2 requires PHP 8.3+, so skip the 8.2 combinations there.
+          # Moodle 5.2 and 5.3 require PHP 8.3+, so skip the 8.2 combinations there.
           - php: '8.2'
             moodle-branch: 'MOODLE_502_STABLE'
+          - php: '8.2'
+            moodle-branch: 'MOODLE_503_STABLE'
 
     env:
       # Australian timezone so date/time tests respect AEST/AWST offsets.
@@ -150,7 +157,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

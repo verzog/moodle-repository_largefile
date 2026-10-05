@@ -92,7 +92,7 @@ adds.
    admin settings tree, so everything for this plugin hangs off its configuration
    page rather than sitting as separate nodes.
 
-Requires Moodle 5.0+ and PHP 8.2–8.4.
+Requires Moodle 5.0–5.3 LTS and PHP 8.2–8.4 (PHP 8.3–8.4 on Moodle 5.2 and 5.3).
 
 ## Security — server-side URL fetch (SSRF)
 
@@ -335,7 +335,7 @@ fix for large files.
 ## Developing / validating
 
 CI (`.github/workflows/moodle-ci.yml`) runs `moodle-plugin-ci` against a real
-Moodle across PHP 8.2–8.4 × Moodle 5.0–5.2 × pgsql/mariadb/mysqli, with the same
+Moodle across PHP 8.2–8.4 × Moodle 5.0–5.3 × pgsql/mariadb/mysqli, with the same
 blocking checks Moodle plugins use: `phplint`, `phpcs`, `phpdoc`, `validate`,
 `savepoints`, `mustache` and `phpunit`. A separate `amd-build` job rebuilds the
 JavaScript with Moodle's grunt and fails if `amd/build/` differs from the commit.
