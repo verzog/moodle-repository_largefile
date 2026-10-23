@@ -2,7 +2,10 @@ name: Moodle CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+    tags:
+      - '*'
   pull_request:
 
 # Cancel an in-progress run when a newer commit lands on the same ref.
@@ -10,206 +13,48 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    services:
-      # PostgreSQL 17 and MariaDB 11.4 are the minimums for Moodle 5.3, and above
-      # the minimums of 5.0-5.2 (PostgreSQL 14, MariaDB 10.11), so one set of
-      # services serves the whole matrix.
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready" --health-interval=10s
-          --health-timeout=5s --health-retries=3
-      mariadb:
-        image: mariadb:11.4
-        env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: true
-          MYSQL_CHARACTER_SET_SERVER: utf8mb4
-          MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
-        ports:
-          - 3306:3306
-        # MariaDB 11 images no longer ship the mysqladmin alias, only mariadb-admin.
-        options: >-
-          --health-cmd="mariadb-admin ping" --health-interval=10s
-          --health-timeout=5s --health-retries=3
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: true
-          MYSQL_CHARACTER_SET_SERVER: utf8mb4
-          MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
-        # Mapped to host 3307 so it doesn't clash with the mariadb service on 3306.
-        ports:
-          - 3307:3306
-        options: >-
-          --health-cmd="mysqladmin ping" --health-interval=10s
-          --health-timeout=5s --health-retries=3
-
-    strategy:
-      fail-fast: false
-      matrix:
-        # Moodle 5.0/5.1 run on PHP 8.2-8.4; Moodle 5.2 and 5.3 LTS dropped 8.2
-        # (8.3-8.4 only).
-        php: ['8.2', '8.3', '8.4']
-        moodle-branch: ['MOODLE_500_STABLE', 'MOODLE_501_STABLE', 'MOODLE_502_STABLE', 'MOODLE_503_STABLE']
-        # mysqli -> MySQL 8.4 service (port 3307); mariadb -> MariaDB 11.4 (3306).
-        database: ['pgsql', 'mariadb', 'mysqli']
-        exclude:
-          # Moodle 5.2 and 5.3 require PHP 8.3+, so skip the 8.2 combinations there.
-          - php: '8.2'
-            moodle-branch: 'MOODLE_502_STABLE'
-          - php: '8.2'
-            moodle-branch: 'MOODLE_503_STABLE'
-
-    env:
-      # Australian timezone so date/time tests respect AEST/AWST offsets.
-      TZ: Australia/Sydney
-
-    steps:
-      - name: Check out plugin
-        uses: actions/checkout@v4
-        with:
-          path: plugin
-
-      - name: Set up PHP ${{ matrix.php }}
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: zip, xml, gd, mbstring, sodium, intl, soap, xmlrpc
-          # Moodle 5.2 requires max_input_vars of 7000 or higher.
-          ini-values: max_input_vars=7000
-          coverage: none
-
-      - name: Initialise moodle-plugin-ci
-        run: |
-          composer create-project -n --no-dev --prefer-dist \
-            moodlehq/moodle-plugin-ci ci ^4
-          echo "$(pwd)/ci/bin" >> "$GITHUB_PATH"
-          echo "$(pwd)/ci/vendor/bin" >> "$GITHUB_PATH"
-          sudo locale-gen en_AU.UTF-8
-
-      - name: Install Moodle
-        run: |
-          case "${{ matrix.database }}" in
-            pgsql)   dbport=5432 ;;
-            mariadb) dbport=3306 ;;
-            mysqli)  dbport=3307 ;;
-          esac
-          moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1 --db-port="$dbport"
-        env:
-          DB: ${{ matrix.database }}
-          MOODLE_BRANCH: ${{ matrix.moodle-branch }}
-
-      - name: PHP Lint
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phplint
-
-      - name: PHP Copy/Paste Detector
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpcpd
-
-      - name: PHP Mess Detector
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpmd
-
-      - name: Moodle Code Checker
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpcs --max-warnings 0
-
-      - name: Moodle PHPDoc Checker
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpdoc --max-warnings 0
-
-      - name: Validating
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci validate
-
-      - name: Check upgrade savepoints
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci savepoints
-
-      - name: Mustache Lint
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci mustache
-
-      - name: PHPUnit tests
-        if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpunit --fail-on-warning
-
-  # The AMD modules are shipped pre-built in amd/build. This job rebuilds them with
-  # Moodle's own grunt toolchain (Babel + minifier + ESLint) and fails if the result
-  # differs from what is committed, so a hand-built or stale artefact — which once
-  # shipped a dialogue broken in every browser — can never reach main again.
-  amd-build:
-    name: AMD build matches source (grunt)
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready" --health-interval=10s
-          --health-timeout=5s --health-retries=3
-
-    steps:
-      - name: Check out plugin
-        uses: actions/checkout@v4
-        with:
-          path: plugin
-
-      - name: Set up PHP 8.4
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: zip, xml, gd, mbstring, sodium, intl, soap, xmlrpc
-          ini-values: max_input_vars=7000
-          coverage: none
-
-      - name: Initialise moodle-plugin-ci
-        run: |
-          composer create-project -n --no-dev --prefer-dist \
-            moodlehq/moodle-plugin-ci ci ^4
-          echo "$(pwd)/ci/bin" >> "$GITHUB_PATH"
-          echo "$(pwd)/ci/vendor/bin" >> "$GITHUB_PATH"
-          sudo locale-gen en_AU.UTF-8
-          # Lets the install step provision the Node version Moodle's .nvmrc names.
-          echo "NVM_DIR=$HOME/.nvm" >> "$GITHUB_ENV"
-
-      # Pinned to Moodle 5.0, the lowest supported release: the committed artefacts are
-      # built with its toolchain (see README, "Developing / validating"), and each
-      # Moodle release ships its own ESLint rules and bundler settings, so checking
-      # against a moving target would fail on rule changes rather than real drift.
-      # Bump this together with a rebuild of amd/build.
-      - name: Install Moodle (with its Node toolchain)
-        run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1 --db-port=5432
-        env:
-          DB: pgsql
-          MOODLE_BRANCH: MOODLE_500_STABLE
-
-      - name: Grunt (rebuild amd/build, lint JS) and fail on any difference
-        run: moodle-plugin-ci grunt --max-lint-warnings 0
-
-      # moodle-plugin-ci grunt already fails when the build changes tracked files; this
-      # makes the intent explicit and shows the diff when it does.
-      - name: Fail if the rebuilt amd/build differs from the commit
-        run: |
-          cd moodle/repository/largefile
-          git status --porcelain -- amd/build
-          git diff --exit-code -- amd/build
+  # The checks and settings live in verzog/moodle-ci-workflows.
+  ci:
+    uses: verzog/moodle-ci-workflows/.github/workflows/moodle-plugin-ci.yml@v1
+    with:
+      # Moodle 5.0-5.3 LTS on PostgreSQL, MariaDB and MySQL (mysqli). Moodle 5.2 and later dropped PHP 8.2.
+      matrix: >-
+        [
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.2", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.2", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.2", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.3", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.3", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.3", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.4", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.4", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_500_STABLE", "php": "8.4", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.2", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.2", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.2", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.3", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.3", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.3", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.4", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.4", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_501_STABLE", "php": "8.4", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.3", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.3", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.3", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.4", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.4", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_502_STABLE", "php": "8.4", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.3", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.3", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.3", "database": "mysqli"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.4", "database": "pgsql"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.4", "database": "mariadb"},
+            {"moodle-branch": "MOODLE_503_STABLE", "php": "8.4", "database": "mysqli"}
+        ]
+      # Grunt also fails when the committed amd/build doesn't match a rebuild.
+      grunt-branch: MOODLE_500_STABLE
+      behat: false
