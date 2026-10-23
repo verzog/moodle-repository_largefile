@@ -19,7 +19,7 @@ permissions:
 jobs:
   # The checks and settings live in verzog/moodle-ci-workflows.
   ci:
-    uses: verzog/moodle-ci-workflows/.github/workflows/moodle-plugin-ci.yml@vdiddy/more-inputs
+    uses: verzog/moodle-ci-workflows/.github/workflows/moodle-plugin-ci.yml@v1
     with:
       # Moodle 5.0-5.3 LTS on PostgreSQL, MariaDB and MySQL (mysqli). Moodle 5.2 and later dropped PHP 8.2.
       matrix: >-
