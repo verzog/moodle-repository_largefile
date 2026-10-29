@@ -2,6 +2,14 @@
 
 All notable changes to `repository_largefile` are documented here.
 
+## Unreleased
+
+- **Moodle 5.1 is now the minimum.** The plugin declares support for Moodle 5.1 to
+  5.3 LTS; Moodle 5.0 is no longer supported or tested. CI moves to the shared
+  workflow in `verzog/moodle-ci-workflows`, which tests Moodle 5.1 to 5.3 on
+  PostgreSQL, MariaDB and MySQL, plus Moodle `main`. The AMD build check now runs on
+  Moodle 5.1.
+
 ## 0.8.4 — 2026-10-04
 
 - **Moodle 5.3 LTS supported.** The plugin now declares support for Moodle 5.0 to

@@ -92,7 +92,7 @@ adds.
    admin settings tree, so everything for this plugin hangs off its configuration
    page rather than sitting as separate nodes.
 
-Requires Moodle 5.0–5.3 LTS and PHP 8.2–8.4 (PHP 8.3–8.4 on Moodle 5.2 and 5.3).
+Requires Moodle 5.1–5.3 LTS and PHP 8.2–8.4 (PHP 8.3–8.4 on Moodle 5.2 and 5.3).
 
 ## Security — server-side URL fetch (SSRF)
 
@@ -334,22 +334,23 @@ fix for large files.
 
 ## Developing / validating
 
-CI (`.github/workflows/moodle-ci.yml`) runs `moodle-plugin-ci` against a real
-Moodle across PHP 8.2–8.4 × Moodle 5.0–5.3 × pgsql/mariadb/mysqli, with the same
-blocking checks Moodle plugins use: `phplint`, `phpcs`, `phpdoc`, `validate`,
-`savepoints`, `mustache` and `phpunit`. A separate `amd-build` job rebuilds the
-JavaScript with Moodle's grunt and fails if `amd/build/` differs from the commit.
-To reproduce locally, install `moodle-plugin-ci` and run those steps against a
-checkout of this repository.
+CI (`.github/workflows/moodle-ci.yml`) calls the shared workflow in
+[verzog/moodle-ci-workflows](https://github.com/verzog/moodle-ci-workflows), which runs
+`moodle-plugin-ci` against a real Moodle 5.1–5.3 LTS (plus Moodle `main`, allowed to
+fail) on PHP 8.2–8.4 and PostgreSQL, MariaDB and MySQL, with the same blocking checks
+Moodle plugins use: `phplint`, `phpcs`, `phpdoc`, `validate`, `savepoints`,
+`mustache`, `grunt` and `phpunit`. Its Grunt step rebuilds the JavaScript on Moodle 5.1
+and fails if `amd/build/` differs from the commit. To reproduce locally, install
+`moodle-plugin-ci` and run those steps against a checkout of this repository.
 
 After editing anything under `amd/src/`, rebuild `amd/build/` with Moodle's own
-toolchain — the plugin has no Gruntfile of its own. From a **Moodle 5.0**
-(`MOODLE_500_STABLE`) checkout — the release the CI check is pinned to, since each
+toolchain — the plugin has no Gruntfile of its own. From a **Moodle 5.1**
+(`MOODLE_501_STABLE`) checkout — the release the CI check is pinned to, since each
 Moodle release ships its own ESLint rules and bundler settings — that contains this
-plugin at `repository/largefile` and has had `npm ci` run:
+plugin at `public/repository/largefile` and has had `nvm use` and `npm ci` run:
 
 ```
-npx grunt amd --root=repository/largefile
+npx grunt amd --root=public/repository/largefile
 ```
 
 Commit the regenerated `amd/build/*.min.js` and `.map` files with the source
