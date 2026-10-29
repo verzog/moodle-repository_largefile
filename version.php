@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'repository_largefile';
-$plugin->version   = 2026100400;      // YYYYMMDDXX. This release.
-$plugin->requires  = 2025041400;      // Moodle 5.0.0 (the lowest supported release).
-$plugin->supported = [500, 503];      // Supports Moodle 5.0 to 5.3 LTS inclusive.
+$plugin->version   = 2026102900;      // YYYYMMDDXX.
+$plugin->requires  = 2025100600;      // Moodle 5.1 (the lowest supported release).
+$plugin->supported = [501, 503];      // Supports Moodle 5.1 to 5.3 LTS inclusive.
 $plugin->maturity  = MATURITY_ALPHA;
 $plugin->release   = '0.8.4';
