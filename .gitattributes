@@ -1,0 +1,7 @@
+# Normalise text files to LF line endings, including on Windows checkouts.
+* text=auto eol=lf
+
+# Keep development-only files out of release zips.
+/.github export-ignore
+/tests export-ignore
+/.gitattributes export-ignore
